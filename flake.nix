@@ -20,21 +20,18 @@
         with pkgs;
         [
           bash
-          cmake
           curl
           dtc
           git
-          lld
-          llvm
           mtools
-          ninja
           openssl
           python3
           qemu
           unifdef
           xz
         ]
-        ++ lib.optionals stdenv.isLinux [
+        ++ lib.optionals stdenv.hostPlatform.isLinux [
+          cmake
           coreutils
           findutils
           gawk
@@ -42,6 +39,9 @@
           gnused
           gnutar
           gzip
+          lld
+          llvm
+          ninja
         ];
     in
     {
