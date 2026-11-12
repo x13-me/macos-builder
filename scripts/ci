@@ -1,0 +1,8 @@
+#!/usr/bin/env nix
+#! nix shell .#ci-tools .#openssl --quiet --command bash
+set -euo pipefail
+export OPENSSL_PREFIX="${OPENSSL_PREFIX:-$(dirname "$(dirname "$(readlink -f "$(command -v openssl)")")")}"
+if [ "$#" -eq 0 ]; then
+  exec bash
+fi
+exec "$@"

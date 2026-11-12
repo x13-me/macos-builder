@@ -1,0 +1,503 @@
+name: Prepare target OS (macOS runner)
+run-name: "Prepare target OS [${{ inputs.target }} / run ${{ github.run_id }}]"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Which target OS to prepare"
+        type: choice
+        options:
+          - ipados
+          - macos
+          - both
+        default: both
+
+      unixnu_repository:
+        description: "UniXNU repository (owner/name)"
+        required: true
+        default: UniXNU/UniXNU
+      unixnu_ref:
+        description: "UniXNU ref/sha"
+        required: true
+        default: main
+
+      ipados_device_repository:
+        description: "iPadOS device repository (owner/name)"
+        required: true
+        default: xVanTuring/UniXNU-qemu
+      ipados_device_ref:
+        description: "iPadOS device repo ref/sha"
+        required: true
+        default: main
+      ipados_defconfig:
+        description: "iPadOS defconfig"
+        required: true
+        default: qemu_root_defconfig
+      ipados_ipsw_url:
+        description: "iPadOS IPSW URL (empty uses UniXNU-qemu board default)"
+        required: false
+        default: ""
+
+      macos_device_repository:
+        description: "macOS device repository (owner/name), required for target macos/both"
+        required: false
+        default: ""
+      macos_device_ref:
+        description: "macOS device repo ref/sha"
+        required: false
+        default: main
+      macos_defconfig:
+        description: "macOS defconfig (device-specific)"
+        required: false
+        default: ""
+      macos_ipsw_url:
+        description: "macOS restore/ipsw URL (device/profile-specific)"
+        required: false
+        default: ""
+      macos_root_build_command:
+        description: >-
+          Optional shell command run in the device tree for macOS root/data prep
+          (e.g. a device script). Env: IPSW, SEED, OPENSSL_PREFIX, UNIXNU_DIR, DEVICE_DIR, OUT_DIR, DEFCONFIG.
+        required: false
+        default: ""
+
+      xcode:
+        description: "Xcode version on macos-26 (/Applications/Xcode_<version>.app)"
+        required: true
+        default: "26.6"
+      qemu_accel:
+        description: "QEMU accel for probes/smoke (tcg portable/slow; hvf may be unavailable)"
+        type: choice
+        options:
+          - tcg
+          - hvf
+        default: tcg
+      upload_artifacts:
+        description: >-
+          Upload out artifacts to GitHub Actions (WARNING: may include Apple-derived/proprietary material; prefer private cache)
+        type: boolean
+        default: false
+      cachix_name:
+        description: "Optional Cachix cache name to push to (requires secret CACHIX_AUTH_TOKEN; cache should be private)"
+        required: false
+        default: ""
+      nix_copy_to:
+        description: "Optional Nix store URI for `nix copy --to` (e.g. s3://..., ssh-ng://...). Configure credentials via secrets/env as needed."
+        required: false
+        default: ""
+      run_smoke:
+        description: "Attempt a headless QEMU smoke boot when a run script is available"
+        type: boolean
+        default: false
+      smoke_seconds:
+        description: "Smoke run seconds (0 = no auto-exit by time)"
+        required: false
+        default: "120"
+
+permissions:
+  contents: "read"
+
+concurrency:
+  group: prep-target-os-${{ github.ref }}-${{ inputs.target }}-${{ inputs.unixnu_ref }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  plan:
+    name: Plan targets
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: "read"
+
+    outputs:
+      matrix: ${{ steps.mk.outputs.matrix }}
+
+    steps:
+      - name: Generate matrix
+        id: mk
+        env:
+          TARGET: ${{ inputs.target }}
+          UNIXNU_REPO: ${{ inputs.unixnu_repository }}
+          UNIXNU_REF: ${{ inputs.unixnu_ref }}
+          IPADOS_DEV_REPO: ${{ inputs.ipados_device_repository }}
+          IPADOS_DEV_REF: ${{ inputs.ipados_device_ref }}
+          IPADOS_DEFCONFIG: ${{ inputs.ipados_defconfig }}
+          IPADOS_IPSW: ${{ inputs.ipados_ipsw_url }}
+          MACOS_DEV_REPO: ${{ inputs.macos_device_repository }}
+          MACOS_DEV_REF: ${{ inputs.macos_device_ref }}
+          MACOS_DEFCONFIG: ${{ inputs.macos_defconfig }}
+          MACOS_IPSW: ${{ inputs.macos_ipsw_url }}
+          MACOS_ROOT_CMD: ${{ inputs.macos_root_build_command }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+
+          target = os.environ['TARGET']
+          common = {
+              'unixnu_repository': os.environ['UNIXNU_REPO'],
+              'unixnu_ref': os.environ['UNIXNU_REF'],
+          }
+          entries = []
+          if target in ('ipados', 'both'):
+              entries.append({
+                  **common,
+                  'name': 'ipados',
+                  'device_repository': os.environ['IPADOS_DEV_REPO'],
+                  'device_ref': os.environ['IPADOS_DEV_REF'],
+                  'defconfig': os.environ['IPADOS_DEFCONFIG'],
+                  'ipsw_url': os.environ['IPADOS_IPSW'],
+                  'root_mode': 'unixnu-qemu',
+                  'root_build_command': '',
+              })
+          if target in ('macos', 'both'):
+              dev = os.environ['MACOS_DEV_REPO'].strip()
+              cfg = os.environ['MACOS_DEFCONFIG'].strip()
+              if dev and cfg:
+                  entries.append({
+                      **common,
+                      'name': 'macos',
+                      'device_repository': dev,
+                      'device_ref': os.environ.get('MACOS_DEV_REF', 'main') or 'main',
+                      'defconfig': cfg,
+                      'ipsw_url': os.environ.get('MACOS_IPSW', ''),
+                      'root_mode': 'custom',
+                      'root_build_command': os.environ.get('MACOS_ROOT_CMD', ''),
+                  })
+              else:
+                  entries.append({
+                      **common,
+                      'name': 'macos',
+                      'device_repository': '',
+                      'device_ref': '',
+                      'defconfig': '',
+                      'ipsw_url': '',
+                      'root_mode': 'skip',
+                      'root_build_command': '',
+                  })
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+              f.write('matrix=' + json.dumps({'include': entries}) + '\n')
+          PY
+
+  prepare:
+    name: "Prepare: ${{ matrix.name }}"
+    needs: plan
+    runs-on: macos-26
+    timeout-minutes: 360
+    permissions:
+      contents: "read"
+
+    strategy:
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+      fail-fast: false
+
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_${{ inputs.xcode }}.app/Contents/Developer
+      UNIXNU_QEMU_ACCEL: ${{ inputs.qemu_accel }}
+      TARGET_NAME: ${{ matrix.name }}
+      DEVICE_REPOSITORY: ${{ matrix.device_repository }}
+      DEVICE_REF: ${{ matrix.device_ref }}
+      DEFCONFIG: ${{ matrix.defconfig }}
+      IPSW_URL: ${{ matrix.ipsw_url }}
+      ROOT_MODE: ${{ matrix.root_mode }}
+      ROOT_BUILD_COMMAND: ${{ matrix.root_build_command }}
+      BUILDER: ${{ github.workspace }}/builder
+
+    steps:
+      - name: Validate target configuration
+        id: validate
+        run: |
+          set -euo pipefail
+          if [[ "$ROOT_MODE" == "skip" || -z "$DEVICE_REPOSITORY" || -z "$DEFCONFIG" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Skipping macOS target: set macos_device_repository and macos_defconfig (and any required root prep inputs)."
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Check out builder (flake + scripts)
+        if: ${{ steps.validate.outputs.skip != 'true' }}
+        uses: actions/checkout@v6
+        with:
+          path: builder
+          persist-credentials: false
+
+      - name: Install Nix
+        if: ${{ steps.validate.outputs.skip != 'true' }}
+        uses: DeterminateSystems/determinate-nix-action@v3
+        with:
+          extra-conf: |
+            substituters = https://${{ secrets.CACHE }}/?priority=100 ${{ vars.SUBSTITUTERS}}
+            trusted-public-keys = ${{ secrets.CACHE_KEY }} ${{ vars.PUBKEYS }}
+            build-dir = /nix/build
+          summarize: false
+
+      - name: Start Magic Nix Cache
+        if: ${{ steps.validate.outputs.skip != 'true' }}
+        uses: DeterminateSystems/magic-nix-cache-action@main
+        with:
+          use-flakehub: false
+
+      - name: Configure Cachix
+        if: ${{ steps.validate.outputs.skip != 'true' && inputs.cachix_name != '' }}
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ inputs.cachix_name }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Prepare flake CI environment
+        if: ${{ steps.validate.outputs.skip != 'true' }}
+        run: |
+          set -euo pipefail
+          nix build "$BUILDER#ci-tools" --no-link
+          openssl_prefix="$(nix eval --raw "$BUILDER#openssl.out")"
+          echo "OPENSSL_PREFIX=${openssl_prefix}" >> "$GITHUB_ENV"
+
+      - name: Check out UniXNU
+        if: ${{ steps.validate.outputs.skip != 'true' }}
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ matrix.unixnu_repository }}
+          ref: ${{ matrix.unixnu_ref }}
+          path: UniXNU
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Check out device repository
+        if: ${{ steps.validate.outputs.skip != 'true' }}
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ matrix.device_repository }}
+          ref: ${{ matrix.device_ref }}
+          path: device
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Report environment
+        if: ${{ steps.validate.outputs.skip != 'true' }}
+        run: |
+          set -euo pipefail
+          (cd "$BUILDER" && ./scripts/report-env.sh)
+
+      - name: Resolve platform seed
+        if: ${{ steps.validate.outputs.skip != 'true' }}
+        id: seed
+        env:
+          SECRET_SEED: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p device/.cache
+          seed="$(cd "$BUILDER" && ./scripts/resolve-seed.sh "$GITHUB_WORKSPACE/device" "${SECRET_SEED:-}")"
+          echo "::add-mask::$seed"
+          echo "seed=$seed" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure IPSW/restore image
+        if: ${{ steps.validate.outputs.skip != 'true' }}
+        id: ipsw
+        run: |
+          set -euo pipefail
+          fallback=""
+          if [ -z "$IPSW_URL" ] && [ "$ROOT_MODE" = "unixnu-qemu" ]; then
+            fallback="https://updates.cdn-apple.com/2025SpringFCS/fullrestores/122-77166/DCA6CFE8-90E9-4B92-880D-3DE171798E40/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw"
+          fi
+          ipsw="$(cd "$BUILDER" && ./scripts/ensure-ipsw.sh "$IPSW_URL" "$RUNNER_TEMP/ipsw" "$fallback")"
+          if [ -z "$ipsw" ]; then
+            echo "ipsw=" >> "$GITHUB_OUTPUT"
+            echo "::notice::No IPSW URL provided for $TARGET_NAME; relying on device/unixnu defaults and local inputs."
+            exit 0
+          fi
+          echo "ipsw=$ipsw" >> "$GITHUB_OUTPUT"
+          echo "UNIXNU_IPSW=$ipsw" >> "$GITHUB_ENV"
+
+      - name: defconfig / fetch / ipsw components
+        if: ${{ steps.validate.outputs.skip != 'true' }}
+        working-directory: UniXNU
+        run: |
+          set -euo pipefail
+          nix develop "$BUILDER#ci" -c bash -euo pipefail -c '
+            if [ "$ROOT_MODE" = "unixnu-qemu" ]; then
+              ./unixnu defconfig qemu_defconfig -D ../device
+            else
+              ./unixnu defconfig "$DEFCONFIG" -D ../device
+            fi
+            ./unixnu fetch -D ../device
+            ./unixnu ipsw fetch -D ../device || true
+            ./unixnu status --json || true
+          '
+
+      - name: Build package and kernel (base)
+        if: ${{ steps.validate.outputs.skip != 'true' }}
+        working-directory: UniXNU
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          nix develop "$BUILDER#ci" -c bash -euo pipefail -c '
+            if [ "$ROOT_MODE" = "unixnu-qemu" ]; then
+              ./unixnu defconfig qemu_defconfig -D ../device
+            else
+              ./unixnu defconfig "$DEFCONFIG" -D ../device
+            fi
+            ./unixnu build package kernel -D ../device
+          '
+
+      - name: Build payload (base)
+        if: ${{ steps.validate.outputs.skip != 'true' }}
+        working-directory: UniXNU
+        env:
+          SEED: ${{ steps.seed.outputs.seed }}
+        run: |
+          set -euo pipefail
+          nix develop "$BUILDER#ci" -c bash -euo pipefail -c '
+            if [ "$ROOT_MODE" = "unixnu-qemu" ]; then
+              ./unixnu defconfig qemu_defconfig -D ../device
+            else
+              ./unixnu defconfig "$DEFCONFIG" -D ../device
+            fi
+            ./unixnu build payload -D ../device --unique-chip-id "$SEED" || ./unixnu build payload -D ../device --unique-chip-id "$SEED" --skip-setup || true
+          '
+
+      - name: Prepare root/data inputs (iPadOS / UniXNU-qemu)
+        if: ${{ steps.validate.outputs.skip != 'true' && matrix.root_mode == 'unixnu-qemu' }}
+        id: osroot
+        working-directory: UniXNU
+        env:
+          IPSW: ${{ steps.ipsw.outputs.ipsw }}
+          SEED: ${{ steps.seed.outputs.seed }}
+        run: |
+          set -euo pipefail
+          nix develop "$BUILDER#ci" -c bash -euo pipefail -c '
+            tree="out/qemu/tree"
+            if [ ! -d "$tree/scripts" ]; then
+              tree="$(dirname "$(dirname "$(find out -path "*/scripts/run-qemu.py" | head -n 1)")")"
+            fi
+            export UNIXNU_QEMU_ACCEL
+            (cd "$tree" && python3 scripts/build-os-root.py --ipsw "$IPSW" --openssl-prefix "$OPENSSL_PREFIX")
+            data_uuid="$(python3 -c "import json; print(json.load(open(\"$tree/.cache/firmware/owner-data/seed.json\"))[\"volume_uuid\"])" )"
+            echo "data_uuid=$data_uuid" >> "$GITHUB_OUTPUT"
+            echo "tree=$tree" >> "$GITHUB_OUTPUT"
+          '
+
+      - name: Prepare root/data inputs (macOS / custom)
+        if: ${{ steps.validate.outputs.skip != 'true' && matrix.root_mode == 'custom' }}
+        id: osroot_macos
+        working-directory: UniXNU
+        env:
+          IPSW: ${{ steps.ipsw.outputs.ipsw }}
+          SEED: ${{ steps.seed.outputs.seed }}
+          UNIXNU_DIR: ${{ github.workspace }}/UniXNU
+          DEVICE_DIR: ${{ github.workspace }}/device
+          OUT_DIR: ${{ github.workspace }}/UniXNU/out
+        run: |
+          set -euo pipefail
+          nix develop "$BUILDER#ci" -c bash -euo pipefail -c '
+            if [ -n "$ROOT_BUILD_COMMAND" ]; then
+              echo "Running custom root prep: $ROOT_BUILD_COMMAND"
+              bash -lc "$ROOT_BUILD_COMMAND"
+            else
+              echo "::notice::No macos_root_build_command provided; built base package/kernel/payload only. Provide a device-specific root/data prep command for full macOS target OS preparation."
+            fi
+          '
+
+      - name: Rebuild kernel/payload for root target (iPadOS / UniXNU-qemu)
+        if: ${{ steps.validate.outputs.skip != 'true' && matrix.root_mode == 'unixnu-qemu' }}
+        working-directory: UniXNU
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SEED: ${{ steps.seed.outputs.seed }}
+          XNU_OWNER_DATA_VOLUME_UUID: ${{ steps.osroot.outputs.data_uuid }}
+          TREE: ${{ steps.osroot.outputs.tree }}
+        run: |
+          set -euo pipefail
+          nix develop "$BUILDER#ci" -c bash -euo pipefail -c '
+            export XNU_OWNER_DATA_VOLUME_UUID
+            ./unixnu defconfig "$DEFCONFIG" -D ../device
+            ./unixnu build kernel -D ../device
+            trust="$TREE/build/original-static-system-trust/original-static-system.bundle"
+            data="$TREE/.cache/firmware/owner-data/owner-data-1g.dbr"
+            ./unixnu build payload -D ../device --unique-chip-id "$SEED" --trust-cache "$trust" --data-ramdisk "$data"
+          '
+
+      - name: Smoke boot (optional)
+        if: ${{ steps.validate.outputs.skip != 'true' && inputs.run_smoke == true }}
+        working-directory: UniXNU
+        env:
+          SECONDS: ${{ inputs.smoke_seconds }}
+          SEED: ${{ steps.seed.outputs.seed }}
+        run: |
+          set -euo pipefail
+          nix develop "$BUILDER#ci" -c bash -euo pipefail -c '
+            runner="$(find out -path "*/scripts/run-qemu.py" | head -n 1 || true)"
+            if [ -z "$runner" ]; then
+              echo "::warning::No run-qemu.py found; skipping smoke boot."
+              exit 0
+            fi
+            args=(--display none --accel "$UNIXNU_QEMU_ACCEL")
+            if [ "$ROOT_MODE" = "unixnu-qemu" ]; then
+              args+=(--os-root)
+            else
+              args+=(--native-user)
+            fi
+            if [ "$SECONDS" != "0" ]; then
+              args+=(--seconds "$SECONDS")
+            fi
+            mkdir -p "$RUNNER_TEMP/smoke"
+            set +e
+            python3 "$runner" "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/smoke/run.log"
+            echo "rc=${PIPESTATUS[0]}" >> "$GITHUB_STEP_SUMMARY"
+            set -e
+          '
+
+      - name: Push build output to Nix cache
+        if: ${{ always() && steps.validate.outputs.skip != 'true' && (inputs.cachix_name != '' || inputs.nix_copy_to != '') }}
+        env:
+          CACHIX_NAME: ${{ inputs.cachix_name }}
+          NIX_COPY_TO: ${{ inputs.nix_copy_to }}
+        run: |
+          set -euo pipefail
+          # nix-shebang script in repo calls the flake's ci environment
+          (cd "$BUILDER" && ./scripts/push-out.sh "$GITHUB_WORKSPACE/UniXNU/out" "$TARGET_NAME" "$CACHIX_NAME" "$NIX_COPY_TO") || echo "::warning::Cache push failed or nothing to push."
+
+      - name: Collect artifacts
+        if: ${{ always() && steps.validate.outputs.skip != 'true' && inputs.upload_artifacts == true }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/artifacts"
+          if [[ -d UniXNU/out ]]; then
+            nix develop "$BUILDER#ci" -c bash -c "tar -C UniXNU -czf \"$RUNNER_TEMP/artifacts/unixnu-out-${TARGET_NAME}.tar.gz\" out" || true
+          fi
+          if [[ -d "$RUNNER_TEMP/smoke" ]]; then
+            cp -a "$RUNNER_TEMP/smoke" "$RUNNER_TEMP/artifacts/smoke-${TARGET_NAME}" || true
+          fi
+          find "$RUNNER_TEMP/artifacts" -maxdepth 2 -type f -ls || true
+
+      - name: Upload artifacts
+        if: ${{ always() && steps.validate.outputs.skip != 'true' && inputs.upload_artifacts == true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unixnu-prep-${{ matrix.name }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/artifacts
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Summary
+        if: ${{ always() }}
+        run: |
+          {
+            echo "## Prepare ${TARGET_NAME}"
+            echo
+            echo "- device: ${DEVICE_REPOSITORY:-n/a} @ ${DEVICE_REF:-n/a}"
+            echo "- defconfig: ${DEFCONFIG:-n/a}"
+            echo "- root mode: ${ROOT_MODE}"
+            echo "- tools: Nix flake (builder/#ci) via nix-shebang scripts"
+            echo "- Artifacts may include Apple-derived/proprietary material; handle accordingly."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup
+        if: ${{ always() }}
+        run: rm -rf "$RUNNER_TEMP/ipsw" UniXNU/out/ipsw UniXNU/out/feeds || true
