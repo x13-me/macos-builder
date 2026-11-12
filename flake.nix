@@ -16,19 +16,14 @@
       ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
       ciToolList =
-        pkgs: with pkgs; [
+        pkgs:
+        with pkgs;
+        [
           bash
           cmake
-          coreutils
           curl
           dtc
-          findutils
-          gawk
           git
-          gnugrep
-          gnused
-          gnutar
-          gzip
           lld
           llvm
           mtools
@@ -38,6 +33,15 @@
           qemu
           unifdef
           xz
+        ]
+        ++ lib.optionals stdenv.isLinux [
+          coreutils
+          findutils
+          gawk
+          gnugrep
+          gnused
+          gnutar
+          gzip
         ];
     in
     {
