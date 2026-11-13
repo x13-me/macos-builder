@@ -102,11 +102,69 @@ on:
         description: "Prompt passed to `opencode run` when diagnose_on_failure is true"
         required: false
         default: >-
-          Diagnose why this macOS UniXNU target-OS preparation workflow failed.
-          Inspect UniXNU/out (especially UniXNU/out/**/logs and the most recent
-          failing step output available on disk), the device/build config, and
-          the macos-builder flake/scripts. Identify the root cause, cite the
-          relevant log lines/files, and suggest the minimal fix.
+          Diagnose why this macOS UniXNU target-OS preparation workflow failed,
+          then ATTEMPT TO EXECUTE the minimal fix on this runner and verify it.
+          Do not stop at suggestions: identify the root cause from logs/files,
+          make concrete edits, rerun the failing command(s)/step logic or
+          equivalent checks, and report what you changed, what you ran, and the
+          outcome (with cited log lines/paths). If you cannot fully execute a fix
+          (missing secrets/credentials, Apple inputs, external limits, or
+          non-reproducible runner state), still apply the smallest safe local fix
+          you can, explain the blocker precisely, and leave actionable
+          instructions/patch details.
+
+          Where to look: UniXNU/out/**/logs (especially kernel-bootstrap.log and
+          step logs), UniXNU/out/**/status.json, UniXNU/ (scripts, build-xnu-4k-
+          baseline.sh, unixnu CLI), device/ (board/defconfig/feeds/patches), and
+          builder/ (flake.nix, flake.lock, .github/workflows/prep-target-os.yml,
+          scripts/*.sh).
+
+          Relevant documentation (source of truth, provided inline):
+          - https://unixnu.com/building : `./unixnu defconfig <name> -D <device>`;
+            `./unixnu fetch`; `./unixnu ipsw info|fetch`; `./unixnu build kernel`;
+            `./unixnu build package`; `./unixnu build payload` (and userdata/bootimg
+            as applicable). macOS kernel builds use Xcode; outputs under
+            out/<device>/<os_profile>/<config>/ (kernel/kernel.macho, package/build
+            products, payload, logs). Check `./unixnu status --json`.
+          - https://unixnu.com/guide/requirements : macOS needs Xcode (kernel uses
+            Xcode/iphoneos SDK), Python 3.11+, git/make, cmake, ninja, unifdef, LLVM
+            with lld, mtools, dtc, QEMU optional. Linux kernel step needs the
+            separate XNU toolchain (scripts/linux/setup-toolchain.py, /opt/unixnu-linux
+            or UNIXNU_TOOLCHAIN: patched clang, cctools-port ld64/libtool/nm/lipo,
+            mig, iig, shims, lzfse). `--skip-setup` and Data seed resizing need macOS
+            hdiutil/diskutil.
+          - https://unixnu.com/guide/build-kernel : kernel step applies patches,
+            prepares headers, may do bootstrap pass for compile records, builds
+            archives/components, builds/links XNU, prelinks against kernelcache.
+            On macOS uses Xcode environment; on Linux uses UNIXNU_TOOLCHAIN layout.
+            Failures: read first failing log under out/*/logs.
+          - https://unixnu.com/reference/qemu : `scripts/run-qemu.py` boots ESP/
+            payload; `--native-user` runs mockfs test process (qemu_defconfig path);
+            `--os-root` attaches OS/SystemOS images for root/iPadOS userland;
+            TCG is slow/portable, HVF macOS-only where available.
+          - UniXNU-qemu (device xVanTuring/UniXNU-qemu): `qemu_defconfig` builds
+            kernel/package/payload for mockfs/test boot (no full iPadOS userland).
+            `qemu_root_defconfig` boots original iPadOS userland but requires
+            macOS-only root prep: `scripts/build-os-root.py --ipsw <IPSW>
+            --openssl-prefix <OPENSSL_PREFIX>` (uses hdiutil/diskutil/APFS) to
+            produce OS/SystemOS images, owner keys/policies, verified VirtIO/RAM
+            block drivers, 1 GiB data seed, display/trust cache inputs. Then rebuild
+            kernel with `XNU_OWNER_DATA_VOLUME_UUID` from
+            `.cache/firmware/owner-data/seed.json` and rebuild payload with
+            `--trust-cache <tree>/build/original-static-system-trust/original-static-system.bundle`
+            and `--data-ramdisk <tree>/.cache/firmware/owner-data/owner-data-1g.dbr`.
+            Run: `python3 <tree>/scripts/run-qemu.py --os-root --display none`.
+          - macos-builder (this repo): flake-first; CI tools come from
+            `nix develop ./builder#ci` / nix-shebang scripts in builder/scripts.
+            On Darwin, do NOT shadow Xcode/macOS system build tools with Nix
+            coreutils/findutils/gawk/gnused/gnutar/gzip or Nix llvm/lld/cmake/ninja
+            (use Xcode xcodebuild/xcrun/SDKs). macOS-native required: Xcode and
+            hdiutil/diskutil. OPENSSL_PREFIX is from `nix eval --raw ./builder#openssl.out`.
+            Workflow: checkout builder/UniXNU/device, defconfig/fetch/ipsw, build
+            package+kernel, build base payload, (ipados/qemu_root) build-os-root.py,
+            rebuild kernel+payload with owner data UUID/trust cache/data ramdisk,
+            optional smoke boot/cache push/artifacts. Keep secrets private; outputs
+            may be Apple-derived/proprietary (default no public artifacts).
 
 permissions:
   contents: "read"
@@ -538,7 +596,7 @@ jobs:
           export OPENCODE_TITLE="UniXNU prep failure: run ${{ github.run_id }} attempt ${{ github.run_attempt }} ${TARGET_NAME} (${ROOT_MODE})"
           export OPENCODE_PROMPT="${OPENCODE_PROMPT}
           Context: target=${TARGET_NAME}, root_mode=${ROOT_MODE}, defconfig=${DEFCONFIG:-n/a}, device=${DEVICE_REPOSITORY:-n/a}@${DEVICE_REF:-n/a}, unixnu_ref=${{ matrix.unixnu_ref }}, xcode=${{ inputs.xcode }}, accel=${UNIXNU_QEMU_ACCEL}.
-          Workspace: ${GITHUB_WORKSPACE} (UniXNU checkout in UniXNU/, device in device/, builder flake/scripts in builder/). Look for build logs under UniXNU/out and summarize the failure before proposing fixes."
+          Workspace: ${GITHUB_WORKSPACE} (UniXNU checkout in UniXNU/, device in device/, builder flake/scripts in builder/). Start by collecting the failing logs under UniXNU/out, then diagnose and ATTEMPT TO EXECUTE the minimal fix and verify it here when feasible."
 
           # Update diagnose behavior in builder/scripts/diagnose-opencode.sh
           (cd "$BUILDER" && ./scripts/diagnose-opencode.sh) || {
