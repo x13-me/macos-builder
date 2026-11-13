@@ -378,6 +378,26 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
+      - name: Apply device build fixes
+        if: ${{ steps.validate.outputs.skip != 'true' }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYTHON'
+          from pathlib import Path
+
+          for name in ('qemu_defconfig', 'qemu_root_defconfig'):
+              cfg = Path('device/configs') / name
+              if not cfg.exists():
+                  continue
+              text = cfg.read_text()
+              if 'CONFIG_XNU_BUILD_ARCHIVES=y' in text:
+                  continue
+              if not text.endswith('\n'):
+                  text += '\n'
+              cfg.write_text(text + 'CONFIG_XNU_BUILD_ARCHIVES=y\n')
+              print(f'Patched {cfg}: enabled CONFIG_XNU_BUILD_ARCHIVES')
+          PYTHON
+
       - name: Report environment
         if: ${{ steps.validate.outputs.skip != 'true' }}
         run: |
