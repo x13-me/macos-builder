@@ -442,6 +442,7 @@ jobs:
               text = display.read_text()
               marker = "print(run(['python3',ROOT/'scripts/audit-mobile-graphics-legacy.py'],text=True),end='')"
               inject = (
+                  "import shutil\n"
                   "for _cdir in (ROOT/'build/native-prelink', ROOT/'build/xnu-prelink'):\n"
                   "    _cdir.mkdir(parents=True, exist_ok=True)\n"
                   "    _kernel = ROOT.parent/'kernel/kernel.macho'\n"
