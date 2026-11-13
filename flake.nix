@@ -24,6 +24,7 @@
           dtc
           git
           lld
+          llvm
           mtools
           opencode
           openssl
