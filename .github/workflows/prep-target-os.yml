@@ -412,6 +412,15 @@ jobs:
               if new != text:
                   arm_driver.write_text(new)
                   print('Patched device/scripts/build-arm-driver.py: NativeAES output -> build/software-aes')
+
+          storage_abi = Path('device/scripts/build-storage-abi.py')
+          if storage_abi.exists():
+              text = storage_abi.read_text()
+              new = text.replace("ROOT / 'build/native-prelink/native-apfs-load-positive.macho'",
+                                 "ROOT / 'build/xnu-prelink/native-apfs-load-positive.macho'")
+              if new != text:
+                  storage_abi.write_text(new)
+                  print('Patched device/scripts/build-storage-abi.py: use xnu-prelink candidate path')
           PYTHON
 
       - name: Report environment
