@@ -458,6 +458,25 @@ jobs:
                   text = text.replace(marker, inject)
                   display.write_text(text)
                   print('Patched device/scripts/build-native-legacy-display.py: provide reference candidate for audit')
+
+          root_cfg = Path('device/configs/qemu_root_defconfig')
+          if root_cfg.exists():
+              t = root_cfg.read_text()
+              if 'CONFIG_XNU_NATIVE_LEGACY_DISPLAY=y' in t:
+                  root_cfg.write_text(t.replace('CONFIG_XNU_NATIVE_LEGACY_DISPLAY=y', 'CONFIG_XNU_NATIVE_LEGACY_DISPLAY=n'))
+                  print('Patched device/configs/qemu_root_defconfig: disable native legacy display for CI')
+          os_root = Path('device/scripts/build-os-root.py')
+          if os_root.exists():
+              t = os_root.read_text()
+              block = (
+                  "if not (ROOT / 'build/native-legacy-display/libNativeLegacyDisplay.late.a').is_file():\n"
+                  "    if not (ROOT / 'build/darwinboot-owner-hvf-mobile-graphics-legacy-class/gdb-stop.json').is_file():\n"
+                  "        step(ROOT / 'scripts/build-display-abi.py')\n"
+                  "    step(ROOT / 'scripts/build-native-legacy-display.py')\n"
+              )
+              if block in t and 'skipped native legacy display for CI' not in t:
+                  os_root.write_text(t.replace(block, "print('skipped native legacy display for CI')\n"))
+                  print('Patched device/scripts/build-os-root.py: skip native legacy display build for CI')
           PYTHON
           PYTHON
 
