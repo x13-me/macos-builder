@@ -23,6 +23,5 @@ exec opencode run \
   --title "$title" \
   --thinking \
   --auto \
-  "$prompt"
+  "$prompt" || opencode models
 
-exec opencode models
