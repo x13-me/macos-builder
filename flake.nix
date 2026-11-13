@@ -24,6 +24,7 @@
           dtc
           git
           mtools
+          opencode
           openssl
           python3
           qemu
