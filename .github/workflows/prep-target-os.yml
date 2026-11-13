@@ -475,8 +475,22 @@ jobs:
                   "    step(ROOT / 'scripts/build-native-legacy-display.py')\n"
               )
               if block in t and 'skipped native legacy display for CI' not in t:
-                  os_root.write_text(t.replace(block, "print('skipped native legacy display for CI')\n"))
-                  print('Patched device/scripts/build-os-root.py: skip native legacy display build for CI')
+                  t = t.replace(block, "print('skipped native legacy display for CI')\n")
+              needle = "        step(ROOT / 'drivers/DarwinBoot/Test/packed_ramdisk.py', raw, seed)"
+              if needle in t and 'packed_ramdisk candidates' not in t:
+                  t = t.replace(needle, (
+                      "        _packed = ROOT / 'drivers/DarwinBoot/Test/packed_ramdisk.py'\n"
+                      "        if not _packed.exists():\n"
+                      "            for _c in (ROOT.parent.parent / 'drivers/DarwinBoot/Test/packed_ramdisk.py',\n"
+                      "                       ROOT.parent / 'drivers/DarwinBoot/Test/packed_ramdisk.py'):\n"
+                      "                if _c.exists():\n"
+                      "                    _packed = _c\n"
+                      "                    break\n"
+                      "        step(_packed, raw, seed)"
+                  ))
+                  print('Patched device/scripts/build-os-root.py: locate packed_ramdisk.py fallback')
+              os_root.write_text(t)
+              print('Patched device/scripts/build-os-root.py: CI compatibility fixes')
           PYTHON
           PYTHON
 
