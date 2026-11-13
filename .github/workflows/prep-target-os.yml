@@ -535,11 +535,13 @@ jobs:
           find UniXNU/out -type f \( -name '*.log' -o -name '*bootstrap*' -o -name 'status.json' \) 2>/dev/null | head -200 || true
           echo "::endgroup::"
 
-          prompt="${OPENCODE_PROMPT}
+          export OPENCODE_TITLE="UniXNU prep failure: run ${{ github.run_id }} attempt ${{ github.run_attempt }} ${TARGET_NAME} (${ROOT_MODE})"
+          export OPENCODE_PROMPT="${OPENCODE_PROMPT}
           Context: target=${TARGET_NAME}, root_mode=${ROOT_MODE}, defconfig=${DEFCONFIG:-n/a}, device=${DEVICE_REPOSITORY:-n/a}@${DEVICE_REF:-n/a}, unixnu_ref=${{ matrix.unixnu_ref }}, xcode=${{ inputs.xcode }}, accel=${UNIXNU_QEMU_ACCEL}.
           Workspace: ${GITHUB_WORKSPACE} (UniXNU checkout in UniXNU/, device in device/, builder flake/scripts in builder/). Look for build logs under UniXNU/out and summarize the failure before proposing fixes."
 
-          nix run nixpkgs#opencode -- run "$prompt" || {
+          # Update diagnose behavior in builder/scripts/diagnose-opencode.sh
+          (cd "$BUILDER" && ./scripts/diagnose-opencode.sh) || {
             echo "::warning::opencode diagnosis failed (check provider credentials/secrets and nixpkgs#opencode availability)."
             exit 0
           }
