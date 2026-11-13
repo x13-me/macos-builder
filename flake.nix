@@ -23,6 +23,8 @@
           curl
           dtc
           git
+          gnumake
+          llvmPackages.clang-unwrapped
           lld
           llvm
           mtools
@@ -42,7 +44,6 @@
           gnused
           gnutar
           gzip
-          llvm
           ninja
         ];
     in
