@@ -24,3 +24,5 @@ exec opencode run \
   --thinking \
   --auto \
   "$prompt"
+
+exec opencode models
