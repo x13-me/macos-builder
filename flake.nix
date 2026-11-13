@@ -23,6 +23,7 @@
           curl
           dtc
           git
+          lld
           mtools
           opencode
           openssl
@@ -40,7 +41,6 @@
           gnused
           gnutar
           gzip
-          lld
           llvm
           ninja
         ];
