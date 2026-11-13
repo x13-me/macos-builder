@@ -427,10 +427,10 @@ jobs:
               text = make_adt.read_text()
               marker = "put(chosen, 'unique-chip-id', struct.pack('<Q', args.unique_chip_id))"
               guard = (
-                  "        if not 0 < args.unique_chip_id < (1 << 64):\\n"
-                  "            raise SystemExit(f'--unique-chip-id must be a nonzero u64: {args.unique_chip_id:#x}')\\n"
-                  "        if not 0 <= args.chip_id < (1 << 32):\\n"
-                  "            raise SystemExit(f'--chip-id must be a u32: {args.chip_id:#x}')\\n"
+                  "        if not 0 < args.unique_chip_id < (1 << 64):\n"
+                  "            raise SystemExit(f'--unique-chip-id must be a nonzero u64: {args.unique_chip_id:#x}')\n"
+                  "        if not 0 <= args.chip_id < (1 << 32):\n"
+                  "            raise SystemExit(f'--chip-id must be a u32: {args.chip_id:#x}')\n"
                   "        " + marker
               )
               if marker in text and 'unique-chip-id must be a nonzero u64' not in text:
