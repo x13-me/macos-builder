@@ -339,6 +339,35 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
+      - name: Apply UniXNU build fixes
+        if: ${{ steps.validate.outputs.skip != 'true' }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYTHON'
+          from pathlib import Path
+
+          script = Path('UniXNU/scripts/prepare-xnu-source.py')
+          text = script.read_text()
+          marker = "libkern/libkern/Makefile: version.h installhdrs rule"
+          if marker in text:
+              raise SystemExit(0)
+          patch = r'''
+              # macOS installhdrs portability: install(1) can fail for version.h generation.
+              mk = Path('.cache/xnu-work/libkern/libkern/Makefile')
+              if mk.exists():
+                  mtext = mk.read_text()
+                  old = '\t$(_v)install $(DATA_INSTALL_FLAGS) $< $@\n\t$(_v)$(NEWVERS) $@ > /dev/null'
+                  new = '\t$(_v)cp $< $@ && chmod 0644 $@\n\t$(_v)$(NEWVERS) $@ > /dev/null'
+                  if old in mtext:
+                      mk.write_text(mtext.replace(old, new))
+                      print('Patched libkern/libkern/Makefile: version.h installhdrs rule')
+          '''
+          if text.endswith('\n'):
+              script.write_text(text + patch)
+          else:
+              script.write_text(text + '\n' + patch)
+          PYTHON
+
       - name: Check out device repository
         if: ${{ steps.validate.outputs.skip != 'true' }}
         uses: actions/checkout@v6
