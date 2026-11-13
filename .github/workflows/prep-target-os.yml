@@ -396,6 +396,22 @@ jobs:
                   text += '\n'
               cfg.write_text(text + 'CONFIG_XNU_BUILD_ARCHIVES=y\n')
               print(f'Patched {cfg}: enabled CONFIG_XNU_BUILD_ARCHIVES')
+
+          board = Path('device/board.toml')
+          if board.exists():
+              text = board.read_text()
+              new = text.replace('"build-native-aes-bindings.py",', '"build-software-aes-bindings.py",')
+              if new != text:
+                  board.write_text(new)
+                  print('Patched device/board.toml: use build-software-aes-bindings.py')
+
+          arm_driver = Path('device/scripts/build-arm-driver.py')
+          if arm_driver.exists():
+              text = arm_driver.read_text()
+              new = text.replace("'NativeAES': 'native-aes',", "'NativeAES': 'software-aes',")
+              if new != text:
+                  arm_driver.write_text(new)
+                  print('Patched device/scripts/build-arm-driver.py: NativeAES output -> build/software-aes')
           PYTHON
 
       - name: Report environment
