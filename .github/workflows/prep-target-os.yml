@@ -504,6 +504,11 @@ jobs:
             else
               ./unixnu defconfig "$DEFCONFIG" -D ../device
             fi
+            for tree in out/*/tree; do
+              fontdir="$tree/uefi-sheng/Silicon/Silicium/SiliciumPkg/Library/FrameBufferSerialPortLib"
+              mkdir -p "$fontdir"
+              curl -fsSL https://raw.githubusercontent.com/Project-Silicium/Mu-Silicium/main/Silicon/Silicium/SiliciumPkg/Library/FrameBufferSerialPortLib/Font.h -o "$fontdir/Font.h" || true
+            done
             ./unixnu build payload -D ../device --unique-chip-id "$SEED" || ./unixnu build payload -D ../device --unique-chip-id "$SEED" --skip-setup || true
           '
 
@@ -561,6 +566,11 @@ jobs:
           set -euo pipefail
           nix develop "$BUILDER#ci" -c bash -euo pipefail -c '
             export XNU_OWNER_DATA_VOLUME_UUID
+            for t in "$TREE" out/*/tree; do
+              fontdir="$t/uefi-sheng/Silicon/Silicium/SiliciumPkg/Library/FrameBufferSerialPortLib"
+              mkdir -p "$fontdir" 2>/dev/null || true
+              curl -fsSL https://raw.githubusercontent.com/Project-Silicium/Mu-Silicium/main/Silicon/Silicium/SiliciumPkg/Library/FrameBufferSerialPortLib/Font.h -o "$fontdir/Font.h" 2>/dev/null || true
+            done
             ./unixnu defconfig "$DEFCONFIG" -D ../device
             ./unixnu build kernel -D ../device
             trust="$TREE/build/original-static-system-trust/original-static-system.bundle"
