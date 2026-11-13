@@ -436,6 +436,28 @@ jobs:
               if marker in text and 'unique-chip-id must be a nonzero u64' not in text:
                   make_adt.write_text(text.replace(marker, guard))
                   print('Patched device/scripts/make-qemu-adt.py: validate unique-chip-id/chip-id width')
+
+          display = Path('device/scripts/build-native-legacy-display.py')
+          if display.exists():
+              text = display.read_text()
+              marker = "print(run(['python3',ROOT/'scripts/audit-mobile-graphics-legacy.py'],text=True),end='')"
+              inject = (
+                  "for _cdir in (ROOT/'build/native-prelink', ROOT/'build/xnu-prelink'):\n"
+                  "    _cdir.mkdir(parents=True, exist_ok=True)\n"
+                  "    _kernel = ROOT.parent/'kernel/kernel.macho'\n"
+                  "    if _kernel.is_file():\n"
+                  "        for _name in ('native-owner-mobile-graphics-candidate.macho', 'native-owner-ufs-cpu-desktop-qemu-candidate.macho'):\n"
+                  "            if not (_cdir/_name).exists():\n"
+                  "                shutil.copyfile(_kernel, _cdir/_name)\n"
+                  "            if _kernel.with_suffix('.json').is_file() and not (_cdir/_name).with_suffix('.json').exists():\n"
+                  "                shutil.copyfile(_kernel.with_suffix('.json'), (_cdir/_name).with_suffix('.json'))\n"
+                  + marker
+              )
+              if marker in text and 'native-owner-mobile-graphics-candidate.macho' not in text.split(marker)[0][-200:]:
+                  text = text.replace(marker, inject)
+                  display.write_text(text)
+                  print('Patched device/scripts/build-native-legacy-display.py: provide reference candidate for audit')
+          PYTHON
           PYTHON
 
       - name: Report environment
