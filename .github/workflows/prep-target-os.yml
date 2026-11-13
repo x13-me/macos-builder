@@ -436,6 +436,12 @@ jobs:
         run: |
           set -euo pipefail
           nix develop "$BUILDER#ci" -c bash -euo pipefail -c '
+            if [ "$ROOT_MODE" = "unixnu-qemu" ]; then
+              ./unixnu defconfig qemu_defconfig -D ../device
+            else
+              ./unixnu defconfig "$DEFCONFIG" -D ../device
+            fi
+            ./unixnu tree -D ../device
             tree="out/qemu/tree"
             if [ ! -d "$tree/scripts" ]; then
               tree="$(dirname "$(dirname "$(find out -path "*/scripts/run-qemu.py" 2>/dev/null | head -n 1 || true)")")"
@@ -444,17 +450,34 @@ jobs:
               echo "::notice::No qemu tree found for archive prep; skipping."
               exit 0
             fi
-            cd "$tree"
-            run_script() { local s="$1"; shift; if [ -f "scripts/$s" ]; then echo "+ $s $*"; python3 "scripts/$s" "$@"; fi; }
+            tree="$(cd "$tree" && pwd)"
+            unixnu_root="$(pwd)"
+            mkdir -p "$tree/build" "$tree/refer"
+            if [ ! -e "$unixnu_root/refer" ] && [ -d "$tree/refer" ]; then
+              ln -s "$tree/refer" "$unixnu_root/refer"
+            elif [ -d "$unixnu_root/refer" ] && [ ! -e "$tree/refer/corecrypto-2023" ] && [ -e "$unixnu_root/refer/corecrypto-2023" ]; then
+              ln -s "$unixnu_root/refer/corecrypto-2023" "$tree/refer/corecrypto-2023" 2>/dev/null || true
+            fi
+            export PYTHONPATH="$unixnu_root/scripts:${PYTHONPATH:-}"
+            run_script() {
+              local s="$1"; shift
+              if [ -f "$tree/scripts/$s" ]; then
+                echo "+ $s $*"
+                (cd "$tree" && python3 "scripts/$s" "$@")
+              elif [ -f "$unixnu_root/scripts/$s" ]; then
+                echo "+ (root) $s $*"
+                (cd "$tree" && python3 "$unixnu_root/scripts/$s" "$@")
+              fi
+            }
             run_script build-corecrypto-14.py
             run_script build-corecrypto-14.py --namespace
             run_script build-arm-driver.py ArmDTPlatform
             run_script build-arm-driver.py ArmCpu
             run_script build-arm-driver.py NativeAES
-            if [ -f build/native-aes/libNativeAES.a ]; then
-              mkdir -p build/software-aes
-              cp -f build/native-aes/libNativeAES.a build/software-aes/libSoftwareAES.a
-              [ -f build/native-aes/NativeAES.o ] && cp -f build/native-aes/NativeAES.o build/software-aes/NativeAES.o || true
+            if [ -f "$tree/build/native-aes/libNativeAES.a" ]; then
+              mkdir -p "$tree/build/software-aes"
+              cp -f "$tree/build/native-aes/libNativeAES.a" "$tree/build/software-aes/libSoftwareAES.a"
+              [ -f "$tree/build/native-aes/NativeAES.o" ] && cp -f "$tree/build/native-aes/NativeAES.o" "$tree/build/software-aes/NativeAES.o" || true
             fi
             run_script build-native-aes-bindings.py
             run_script build-libpthread-kernel.py
