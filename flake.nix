@@ -48,23 +48,39 @@
         ];
     in
     {
-      packages = forAllSystems (pkgs: {
-        ci-tools = pkgs.buildEnv {
-          name = "unixnu-macos-builder-ci-tools";
-          paths = ciToolList pkgs;
-        };
-        openssl = pkgs.openssl;
-        default = self.packages.${pkgs.stdenv.hostPlatform.system}.ci-tools;
-      });
+      packages = forAllSystems (pkgs:
+        let
+          # OpenSSL is split in nixpkgs: headers in dev, libraries in out, binaries in bin.
+          # Root-prep steps compile/link against a single prefix, so expose a merged one.
+          opensslPrefix = pkgs.symlinkJoin {
+            name = "openssl-prefix";
+            paths = [ pkgs.openssl.out pkgs.openssl.dev pkgs.openssl.bin ];
+          };
+        in
+        {
+          ci-tools = pkgs.buildEnv {
+            name = "unixnu-macos-builder-ci-tools";
+            paths = ciToolList pkgs;
+          };
+          openssl = opensslPrefix;
+          default = self.packages.${pkgs.stdenv.hostPlatform.system}.ci-tools;
+        });
 
-      devShells = forAllSystems (pkgs: {
-        default = pkgs.mkShellNoCC {
-          packages = ciToolList pkgs;
-          shellHook = ''
-            export OPENSSL_PREFIX="${pkgs.openssl.out}"
-          '';
-        };
-        ci = self.devShells.${pkgs.stdenv.hostPlatform.system}.default;
-      });
+      devShells = forAllSystems (pkgs:
+        let
+          opensslPrefix = pkgs.symlinkJoin {
+            name = "openssl-prefix";
+            paths = [ pkgs.openssl.out pkgs.openssl.dev pkgs.openssl.bin ];
+          };
+        in
+        {
+          default = pkgs.mkShellNoCC {
+            packages = ciToolList pkgs;
+            shellHook = ''
+              export OPENSSL_PREFIX="${opensslPrefix}"
+            '';
+          };
+          ci = self.devShells.${pkgs.stdenv.hostPlatform.system}.default;
+        });
     };
 }
