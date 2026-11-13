@@ -402,8 +402,12 @@ jobs:
               text = board.read_text()
               new = text.replace('"build-native-aes-bindings.py",', '"build-software-aes-bindings.py",')
               if new != text:
-                  board.write_text(new)
+                  text = new
                   print('Patched device/board.toml: use build-software-aes-bindings.py')
+              if 'size_mib = 192' in text:
+                  text = text.replace('size_mib = 192', 'size_mib = 1024', 1)
+                  print('Patched device/board.toml: increase payload volume size for root rebuild')
+              board.write_text(text)
 
           arm_driver = Path('device/scripts/build-arm-driver.py')
           if arm_driver.exists():
