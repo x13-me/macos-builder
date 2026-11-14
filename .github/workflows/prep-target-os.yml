@@ -433,23 +433,24 @@ jobs:
               if marker not in text:
                   if not text.endswith('\n'):
                       text += '\n'
-                  text += r'''
-int native_ufs_store_write_cached(uint64_t block, uint32_t count, const void *buffer);
-STUB int native_ufs_store_write_cached(uint64_t block, uint32_t count, const void *buffer)
-{
-  (void)block;
-  (void)count;
-  (void)buffer;
-  return 0;
-}
-
-void ml_static_mfree_prepare(void *addr, uint64_t size);
-STUB void ml_static_mfree_prepare(void *addr, uint64_t size)
-{
-  (void)addr;
-  (void)size;
-}
-'''
+                  text += (
+                      '\n'
+                      'int native_ufs_store_write_cached(uint64_t block, uint32_t count, const void *buffer);\n'
+                      'STUB int native_ufs_store_write_cached(uint64_t block, uint32_t count, const void *buffer)\n'
+                      '{\n'
+                      '  (void)block;\n'
+                      '  (void)count;\n'
+                      '  (void)buffer;\n'
+                      '  return 0;\n'
+                      '}\n'
+                      '\n'
+                      'void ml_static_mfree_prepare(void *addr, uint64_t size);\n'
+                      'STUB void ml_static_mfree_prepare(void *addr, uint64_t size)\n'
+                      '{\n'
+                      '  (void)addr;\n'
+                      '  (void)size;\n'
+                      '}\n'
+                  )
                   link_stubs.write_text(text)
                   print('Patched device/package/LinkStubs.c: add missing weak stubs')
 
