@@ -604,8 +604,8 @@ jobs:
             export UNIXNU_QEMU_ACCEL
             (cd "$tree" && python3 scripts/build-os-root.py --ipsw "$IPSW" --openssl-prefix "$OPENSSL_PREFIX")
             data_uuid="$(python3 -c "import json; print(json.load(open(\"$tree/.cache/firmware/owner-data/seed.json\"))[\"volume_uuid\"])" )"
-            root_uuid="$(python3 -c "import json; print(json.load(open(\"$tree/build/verified-root-os/verification.json\"))[\"volume_uuid'])")"
-            cache_uuid="$(python3 -c "import json; print(json.load(open(\"$tree/build/verified-root-systemos/verification.json\"))[\"volume_uuid'])")"
+            root_uuid="$(python3 -c "import json; print(json.load(open(\"$tree/build/verified-root-os/verification.json\"))[\"volume_uuid\"])" )"
+            cache_uuid="$(python3 -c "import json; print(json.load(open(\"$tree/build/verified-root-systemos/verification.json\"))[\"volume_uuid\"])" )"
             echo "data_uuid=$data_uuid" >> "$GITHUB_OUTPUT"
             echo "root_uuid=$root_uuid" >> "$GITHUB_OUTPUT"
             echo "cache_uuid=$cache_uuid" >> "$GITHUB_OUTPUT"
