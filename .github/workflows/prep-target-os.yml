@@ -426,6 +426,33 @@ jobs:
                   storage_abi.write_text(new)
                   print('Patched device/scripts/build-storage-abi.py: use xnu-prelink candidate path')
 
+          link_stubs = Path('device/package/LinkStubs.c')
+          if link_stubs.exists():
+              text = link_stubs.read_text()
+              marker = 'native_ufs_store_write_cached'
+              if marker not in text:
+                  if not text.endswith('\n'):
+                      text += '\n'
+                  text += r'''
+int native_ufs_store_write_cached(uint64_t block, uint32_t count, const void *buffer);
+STUB int native_ufs_store_write_cached(uint64_t block, uint32_t count, const void *buffer)
+{
+  (void)block;
+  (void)count;
+  (void)buffer;
+  return 0;
+}
+
+void ml_static_mfree_prepare(void *addr, uint64_t size);
+STUB void ml_static_mfree_prepare(void *addr, uint64_t size)
+{
+  (void)addr;
+  (void)size;
+}
+'''
+                  link_stubs.write_text(text)
+                  print('Patched device/package/LinkStubs.c: add missing weak stubs')
+
           make_adt = Path('device/scripts/make-qemu-adt.py')
           if make_adt.exists():
               text = make_adt.read_text()
@@ -710,9 +737,34 @@ jobs:
               if [ -f "$t/build/ram-block/RamBlock.o" ] && [ ! -f "$t/build/ram-block/NativeRamBlock.o" ]; then
                 cp -f "$t/build/ram-block/RamBlock.o" "$t/build/ram-block/NativeRamBlock.o"
               fi
+              # When both virtio and ram block transports are linked, build-xnu-4k-baseline.sh
+              # links the raw ram-block object (to avoid duplicate aliases) but still needs the
+              # original storage bindings object from the ram-block archive.
+              if [ -f "$t/build/ram-block/libRamBlock.a" ]; then
+                if (cd "$t/build/ram-block" && ar x libRamBlock.a original-bindings.o >/dev/null 2>&1); then
+                  :
+                fi
+              fi
               echo "[ram-block] tree=$t src=${src:-none}"
               ls -la "$t/build/ram-block" 2>/dev/null || true
             done
+
+            # Patch kernel build script so raw ram-block object links keep their original bindings.
+            for f in "$TREE/scripts/build-xnu-4k-baseline.sh" out/*/tree/scripts/build-xnu-4k-baseline.sh; do
+              [ -f "$f" ] || continue
+              python3 - "$f" <<'PY'
+            import pathlib, sys
+            p = pathlib.Path(sys.argv[1])
+            s = p.read_text()
+            old = '      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n      test -f "$RAM_BLOCK_OBJECT"\n      KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT"\n'
+            new = '      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n      test -f "$RAM_BLOCK_OBJECT"\n      RAM_BLOCK_BINDINGS=$ROOT/build/ram-block/original-bindings.o\n      if [ -f "$RAM_BLOCK_BINDINGS" ]; then\n        KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_BINDINGS $RAM_BLOCK_OBJECT"\n      else\n        KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT"\n      fi\n'
+            if old in s and 'RAM_BLOCK_BINDINGS=$ROOT/build/ram-block/original-bindings.o' not in s:
+                s = s.replace(old, new)
+                p.write_text(s)
+                print(f'Patched {p}: link ram-block original-bindings.o with raw object')
+            PY
+            done
+
             ./unixnu build kernel -D ../device
             trust="$TREE/build/original-static-system-trust/original-static-system.bundle"
             data="$TREE/.cache/firmware/owner-data/owner-data-1g.dbr"
