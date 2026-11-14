@@ -688,7 +688,7 @@ jobs:
             # the tree/build layout.
             for t in "$TREE" out/*/tree; do
               [ -d "$t" ] || continue
-              mkdir -p "$t/build/ram-block"
+              mkdir -p "$t/build/ram-block" "$t/build/storage-bindings"
               # Prefer an existing native-ram-block source directory.
               src=""
               for cand in \
@@ -738,20 +738,46 @@ jobs:
               if [ -f "$t/build/ram-block/RamBlock.o" ] && [ ! -f "$t/build/ram-block/NativeRamBlock.o" ]; then
                 cp -f "$t/build/ram-block/RamBlock.o" "$t/build/ram-block/NativeRamBlock.o"
               fi
-              # When both virtio and ram block transports are linked, build-xnu-4k-baseline.sh
-              # links the raw ram-block object (to avoid duplicate aliases) but still needs the
-              # original storage bindings object from the ram-block archive.
+              # Preserve original storage bindings for root kernel linking.
               if [ -f "$t/build/ram-block/libRamBlock.a" ]; then
-                if (cd "$t/build/ram-block" && ar x libRamBlock.a original-bindings.o >/dev/null 2>&1); then
-                  :
+                (cd "$t/build/ram-block" && ar x libRamBlock.a original-bindings.o >/dev/null 2>&1) || true
+              fi
+              if [ -f "$t/build/ram-block/original-bindings.o" ]; then
+                cp -f "$t/build/ram-block/original-bindings.o" "$t/build/storage-bindings/ram-block-original-bindings.o"
+              fi
+              for va in \
+                "$t/build/native-virtio-block-verified-bundle/libNativeVirtioBlock.a" \
+                "$t/build/virtio-mmio-block/libVirtioMmioBlock.a" \
+                "$t/build/native-virtio-block/libNativeVirtioBlock.a"; do
+                if [ -f "$va" ]; then
+                  tmpd="$t/build/storage-bindings/.virtio-tmp"
+                  rm -rf "$tmpd"
+                  mkdir -p "$tmpd"
+                  if (cd "$tmpd" && ar x "$va" original-bindings.o >/dev/null 2>&1); then
+                    cp -f "$tmpd/original-bindings.o" "$t/build/storage-bindings/virtio-original-bindings.o"
+                  fi
+                  rm -rf "$tmpd"
                 fi
+              done
+              if [ ! -f "$t/build/storage-bindings/original-bindings.o" ]; then
+                for c in \
+                  "$t/build/storage-bindings/virtio-original-bindings.o" \
+                  "$t/build/storage-bindings/ram-block-original-bindings.o" \
+                  "$t/build/ram-block/original-bindings.o"; do
+                  if [ -f "$c" ]; then
+                    cp -f "$c" "$t/build/storage-bindings/original-bindings.o"
+                    break
+                  fi
+                done
               fi
               echo "[ram-block] tree=$t src=${src:-none}"
               ls -la "$t/build/ram-block" 2>/dev/null || true
+              echo "[storage-bindings] tree=$t"
+              ls -la "$t/build/storage-bindings" 2>/dev/null || true
             done
           '
 
-          # Patch kernel build script so raw ram-block object links keep their original bindings.
+          # Patch kernel build script so storage driver links include shared original bindings.
           nix run nixpkgs#python3 -- - "$TREE/scripts/build-xnu-4k-baseline.sh" <<'PYTHON'
           import pathlib
           import sys
@@ -762,11 +788,25 @@ jobs:
                   continue
               s = p.read_text()
               old = '      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n      test -f "$RAM_BLOCK_OBJECT"\n      KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT"\n'
-              new = '      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n      test -f "$RAM_BLOCK_OBJECT"\n      RAM_BLOCK_BINDINGS=$ROOT/build/ram-block/original-bindings.o\n      if [ -f "$RAM_BLOCK_BINDINGS" ]; then\n        KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_BINDINGS $RAM_BLOCK_OBJECT"\n      else\n        KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT"\n      fi\n'
-              if old in s and 'RAM_BLOCK_BINDINGS=$ROOT/build/ram-block/original-bindings.o' not in s:
+              new = (
+                  '      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n'
+                  '      test -f "$RAM_BLOCK_OBJECT"\n'
+                  '      for RAM_BLOCK_BINDINGS in \\\n'
+                  '        "$ROOT/build/storage-bindings/original-bindings.o" \\\n'
+                  '        "$ROOT/build/storage-bindings/ram-block-original-bindings.o" \\\n'
+                  '        "$ROOT/build/storage-bindings/virtio-original-bindings.o" \\\n'
+                  '        "$ROOT/build/ram-block/original-bindings.o"; do\n'
+                  '        if [ -f "$RAM_BLOCK_BINDINGS" ]; then\n'
+                  '          KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_BINDINGS"\n'
+                  '          break\n'
+                  '        fi\n'
+                  '      done\n'
+                  '      KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT"\n'
+              )
+              if old in s and 'build/storage-bindings/original-bindings.o' not in s:
                   s = s.replace(old, new)
                   p.write_text(s)
-                  print(f'Patched {p}: link ram-block original-bindings.o with raw object')
+                  print(f'Patched {p}: link shared storage original-bindings.o with raw ram-block object')
           PYTHON
           for f in out/*/tree/scripts/build-xnu-4k-baseline.sh; do
             [ -f "$f" ] || continue
@@ -780,11 +820,25 @@ jobs:
                   continue
               s = p.read_text()
               old = '      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n      test -f "$RAM_BLOCK_OBJECT"\n      KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT"\n'
-              new = '      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n      test -f "$RAM_BLOCK_OBJECT"\n      RAM_BLOCK_BINDINGS=$ROOT/build/ram-block/original-bindings.o\n      if [ -f "$RAM_BLOCK_BINDINGS" ]; then\n        KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_BINDINGS $RAM_BLOCK_OBJECT"\n      else\n        KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT"\n      fi\n'
-              if old in s and 'RAM_BLOCK_BINDINGS=$ROOT/build/ram-block/original-bindings.o' not in s:
+              new = (
+                  '      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n'
+                  '      test -f "$RAM_BLOCK_OBJECT"\n'
+                  '      for RAM_BLOCK_BINDINGS in \\\n'
+                  '        "$ROOT/build/storage-bindings/original-bindings.o" \\\n'
+                  '        "$ROOT/build/storage-bindings/ram-block-original-bindings.o" \\\n'
+                  '        "$ROOT/build/storage-bindings/virtio-original-bindings.o" \\\n'
+                  '        "$ROOT/build/ram-block/original-bindings.o"; do\n'
+                  '        if [ -f "$RAM_BLOCK_BINDINGS" ]; then\n'
+                  '          KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_BINDINGS"\n'
+                  '          break\n'
+                  '        fi\n'
+                  '      done\n'
+                  '      KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT"\n'
+              )
+              if old in s and 'build/storage-bindings/original-bindings.o' not in s:
                   s = s.replace(old, new)
                   p.write_text(s)
-                  print(f'Patched {p}: link ram-block original-bindings.o with raw object')
+                  print(f'Patched {p}: link shared storage original-bindings.o with raw ram-block object')
           PYTHON
           done
 
