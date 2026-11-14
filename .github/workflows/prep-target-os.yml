@@ -654,17 +654,22 @@ jobs:
               curl -fsSL https://raw.githubusercontent.com/Project-Silicium/Mu-Silicium/main/Silicon/Silicium/SiliciumPkg/Library/FrameBufferSerialPortLib/Font.h -o "$fontdir/Font.h" 2>/dev/null || true
             done
             ./unixnu defconfig "$DEFCONFIG" -D ../device
-            # Device port may emit RAM block artifacts under build/native-ram-block;
-            # publish canonical build/ram-block names expected by build-xnu-4k-baseline.sh.
-            # Do this after defconfig in case it refreshes the tree/build layout.
+            # Device port may emit RAM block artifacts under build/native-ram-block or
+            # with native names; publish canonical build/ram-block layout expected by
+            # build-xnu-4k-baseline.sh. Do this after defconfig in case it refreshes
+            # the tree/build layout.
             for t in "$TREE" out/*/tree; do
               [ -d "$t" ] || continue
+              mkdir -p "$t/build/ram-block"
+              # Prefer an existing native-ram-block source directory.
               src=""
-              for cand in "$t/build/native-ram-block" "$(dirname "$t")/build/native-ram-block"; do
+              for cand in \
+                "$t/build/native-ram-block" \
+                "$(dirname "$t")/build/native-ram-block" \
+                "$t/native-ram-block"; do
                 if [ -d "$cand" ]; then src="$cand"; break; fi
               done
               if [ -n "$src" ]; then
-                mkdir -p "$t/build/ram-block"
                 for f in "$src"/*; do
                   [ -e "$f" ] || continue
                   b=$(basename "$f")
@@ -674,6 +679,32 @@ jobs:
                   esac
                 done
               fi
+              # Normalize names if artifacts already landed in canonical dir.
+              if [ -f "$t/build/ram-block/libNativeRamBlock.a" ] && [ ! -e "$t/build/ram-block/libRamBlock.a" ]; then
+                ln -sfn "$t/build/ram-block/libNativeRamBlock.a" "$t/build/ram-block/libRamBlock.a"
+              fi
+              # Fallback: locate bindings.json anywhere under build and mirror its dir.
+              if [ ! -f "$t/build/ram-block/bindings.json" ]; then
+                bj="$(find "$t/build" -name bindings.json 2>/dev/null | head -n 1 || true)"
+                if [ -n "$bj" ] && [ -f "$bj" ]; then
+                  bd="$(dirname "$bj")"
+                  for f in "$bd"/*; do
+                    [ -e "$f" ] || continue
+                    b=$(basename "$f")
+                    case "$b" in
+                      libNativeRamBlock.a) ln -sfn "$f" "$t/build/ram-block/libRamBlock.a" ;;
+                      *) ln -sfn "$f" "$t/build/ram-block/$b" ;;
+                    esac
+                  done
+                fi
+              fi
+              # build-xnu-4k-baseline.sh checks sha256 against <stem-without-lib>.o;
+              # provide common name variants if only NativeRamBlock.o exists.
+              if [ -f "$t/build/ram-block/NativeRamBlock.o" ] && [ ! -e "$t/build/ram-block/RamBlock.o" ]; then
+                ln -sfn "$t/build/ram-block/NativeRamBlock.o" "$t/build/ram-block/RamBlock.o"
+              fi
+              echo "[ram-block] tree=$t"
+              ls -la "$t/build/ram-block" 2>/dev/null || true
             done
             ./unixnu build kernel -D ../device
             trust="$TREE/build/original-static-system-trust/original-static-system.bundle"
