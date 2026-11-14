@@ -669,41 +669,48 @@ jobs:
                 "$t/native-ram-block"; do
                 if [ -d "$cand" ]; then src="$cand"; break; fi
               done
-              if [ -n "$src" ]; then
-                for f in "$src"/*; do
+              publish_ram_block_dir() {
+                local bd="$1"
+                [ -d "$bd" ] || return 0
+                for f in "$bd"/*; do
                   [ -e "$f" ] || continue
+                  local b abs
                   b=$(basename "$f")
+                  abs="$(cd "$(dirname "$f")" && pwd)/$b"
                   case "$b" in
-                    libNativeRamBlock.a) ln -sfn "$f" "$t/build/ram-block/libRamBlock.a" ;;
-                    *) ln -sfn "$f" "$t/build/ram-block/$b" ;;
+                    libNativeRamBlock.a)
+                      cp -f "$abs" "$t/build/ram-block/libNativeRamBlock.a"
+                      cp -f "$abs" "$t/build/ram-block/libRamBlock.a"
+                      ;;
+                    *)
+                      cp -f "$abs" "$t/build/ram-block/$b"
+                      ;;
                   esac
                 done
-              fi
-              # Normalize names if artifacts already landed in canonical dir.
-              if [ -f "$t/build/ram-block/libNativeRamBlock.a" ] && [ ! -e "$t/build/ram-block/libRamBlock.a" ]; then
-                ln -sfn "$t/build/ram-block/libNativeRamBlock.a" "$t/build/ram-block/libRamBlock.a"
+              }
+              if [ -n "$src" ]; then
+                publish_ram_block_dir "$src"
               fi
               # Fallback: locate bindings.json anywhere under build and mirror its dir.
               if [ ! -f "$t/build/ram-block/bindings.json" ]; then
                 bj="$(find "$t/build" -name bindings.json 2>/dev/null | head -n 1 || true)"
                 if [ -n "$bj" ] && [ -f "$bj" ]; then
-                  bd="$(dirname "$bj")"
-                  for f in "$bd"/*; do
-                    [ -e "$f" ] || continue
-                    b=$(basename "$f")
-                    case "$b" in
-                      libNativeRamBlock.a) ln -sfn "$f" "$t/build/ram-block/libRamBlock.a" ;;
-                      *) ln -sfn "$f" "$t/build/ram-block/$b" ;;
-                    esac
-                  done
+                  publish_ram_block_dir "$(dirname "$bj")"
                 fi
               fi
-              # build-xnu-4k-baseline.sh checks sha256 against <stem-without-lib>.o;
-              # provide common name variants if only NativeRamBlock.o exists.
-              if [ -f "$t/build/ram-block/NativeRamBlock.o" ] && [ ! -e "$t/build/ram-block/RamBlock.o" ]; then
-                ln -sfn "$t/build/ram-block/NativeRamBlock.o" "$t/build/ram-block/RamBlock.o"
+              # Normalize names if artifacts already landed in canonical dir.
+              if [ -f "$t/build/ram-block/libNativeRamBlock.a" ] && [ ! -f "$t/build/ram-block/libRamBlock.a" ]; then
+                cp -f "$t/build/ram-block/libNativeRamBlock.a" "$t/build/ram-block/libRamBlock.a"
               fi
-              echo "[ram-block] tree=$t"
+              # build-xnu-4k-baseline.sh checks sha256 against <stem-without-lib>.o for
+              # each archive (libRamBlock.a -> RamBlock.o) and later links NativeRamBlock.o.
+              if [ -f "$t/build/ram-block/NativeRamBlock.o" ] && [ ! -f "$t/build/ram-block/RamBlock.o" ]; then
+                cp -f "$t/build/ram-block/NativeRamBlock.o" "$t/build/ram-block/RamBlock.o"
+              fi
+              if [ -f "$t/build/ram-block/RamBlock.o" ] && [ ! -f "$t/build/ram-block/NativeRamBlock.o" ]; then
+                cp -f "$t/build/ram-block/RamBlock.o" "$t/build/ram-block/NativeRamBlock.o"
+              fi
+              echo "[ram-block] tree=$t src=${src:-none}"
               ls -la "$t/build/ram-block" 2>/dev/null || true
             done
             ./unixnu build kernel -D ../device
