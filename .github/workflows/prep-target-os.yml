@@ -652,11 +652,20 @@ jobs:
               fontdir="$t/uefi-sheng/Silicon/Silicium/SiliciumPkg/Library/FrameBufferSerialPortLib"
               mkdir -p "$fontdir" 2>/dev/null || true
               curl -fsSL https://raw.githubusercontent.com/Project-Silicium/Mu-Silicium/main/Silicon/Silicium/SiliciumPkg/Library/FrameBufferSerialPortLib/Font.h -o "$fontdir/Font.h" 2>/dev/null || true
-              # Device port may emit RAM block artifacts under build/native-ram-block;
-              # publish canonical build/ram-block names expected by build-xnu-4k-baseline.sh.
-              if [ -d "$t/build/native-ram-block" ]; then
+            done
+            ./unixnu defconfig "$DEFCONFIG" -D ../device
+            # Device port may emit RAM block artifacts under build/native-ram-block;
+            # publish canonical build/ram-block names expected by build-xnu-4k-baseline.sh.
+            # Do this after defconfig in case it refreshes the tree/build layout.
+            for t in "$TREE" out/*/tree; do
+              [ -d "$t" ] || continue
+              src=""
+              for cand in "$t/build/native-ram-block" "$(dirname "$t")/build/native-ram-block"; do
+                if [ -d "$cand" ]; then src="$cand"; break; fi
+              done
+              if [ -n "$src" ]; then
                 mkdir -p "$t/build/ram-block"
-                for f in "$t/build/native-ram-block"/*; do
+                for f in "$src"/*; do
                   [ -e "$f" ] || continue
                   b=$(basename "$f")
                   case "$b" in
@@ -666,7 +675,6 @@ jobs:
                 done
               fi
             done
-            ./unixnu defconfig "$DEFCONFIG" -D ../device
             ./unixnu build kernel -D ../device
             trust="$TREE/build/original-static-system-trust/original-static-system.bundle"
             data="$TREE/.cache/firmware/owner-data/owner-data-1g.dbr"
