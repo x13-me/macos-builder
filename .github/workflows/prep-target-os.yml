@@ -604,7 +604,11 @@ jobs:
             export UNIXNU_QEMU_ACCEL
             (cd "$tree" && python3 scripts/build-os-root.py --ipsw "$IPSW" --openssl-prefix "$OPENSSL_PREFIX")
             data_uuid="$(python3 -c "import json; print(json.load(open(\"$tree/.cache/firmware/owner-data/seed.json\"))[\"volume_uuid\"])" )"
+            root_uuid="$(python3 -c "import json,glob,os; p='$tree/build/verified-root-os/verification.json'; print(json.load(open(p))['volume_uuid'])")"
+            cache_uuid="$(python3 -c "import json; p='$tree/build/verified-root-systemos/verification.json'; print(json.load(open(p))['volume_uuid'])")"
             echo "data_uuid=$data_uuid" >> "$GITHUB_OUTPUT"
+            echo "root_uuid=$root_uuid" >> "$GITHUB_OUTPUT"
+            echo "cache_uuid=$cache_uuid" >> "$GITHUB_OUTPUT"
             echo "tree=$tree" >> "$GITHUB_OUTPUT"
           '
 
@@ -636,11 +640,13 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           SEED: ${{ steps.seed.outputs.seed }}
           XNU_OWNER_DATA_VOLUME_UUID: ${{ steps.osroot.outputs.data_uuid }}
+          XNU_OWNER_ROOT_VOLUME_UUID: ${{ steps.osroot.outputs.root_uuid }}
+          XNU_OWNER_CACHE_VOLUME_UUID: ${{ steps.osroot.outputs.cache_uuid }}
           TREE: ${{ steps.osroot.outputs.tree }}
         run: |
           set -euo pipefail
           nix develop "$BUILDER#ci" -c bash -euo pipefail -c '
-            export XNU_OWNER_DATA_VOLUME_UUID
+            export XNU_OWNER_DATA_VOLUME_UUID XNU_OWNER_ROOT_VOLUME_UUID XNU_OWNER_CACHE_VOLUME_UUID
             for t in "$TREE" out/*/tree; do
               fontdir="$t/uefi-sheng/Silicon/Silicium/SiliciumPkg/Library/FrameBufferSerialPortLib"
               mkdir -p "$fontdir" 2>/dev/null || true
