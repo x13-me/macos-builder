@@ -741,24 +741,79 @@ jobs:
               # Preserve original storage bindings for root kernel linking.
               if [ -f "$t/build/ram-block/libRamBlock.a" ]; then
                 (cd "$t/build/ram-block" && ar x libRamBlock.a original-bindings.o >/dev/null 2>&1) || true
+                (cd "$t/build/ram-block" && ar x libRamBlock.a original-bindings.S >/dev/null 2>&1) || true
               fi
               if [ -f "$t/build/ram-block/original-bindings.o" ]; then
                 cp -f "$t/build/ram-block/original-bindings.o" "$t/build/storage-bindings/ram-block-original-bindings.o"
               fi
-              for va in \
-                "$t/build/native-virtio-block-verified-bundle/libNativeVirtioBlock.a" \
-                "$t/build/virtio-mmio-block/libVirtioMmioBlock.a" \
-                "$t/build/native-virtio-block/libNativeVirtioBlock.a"; do
-                if [ -f "$va" ]; then
-                  tmpd="$t/build/storage-bindings/.virtio-tmp"
-                  rm -rf "$tmpd"
-                  mkdir -p "$tmpd"
-                  if (cd "$tmpd" && ar x "$va" original-bindings.o >/dev/null 2>&1); then
-                    cp -f "$tmpd/original-bindings.o" "$t/build/storage-bindings/virtio-original-bindings.o"
-                  fi
-                  rm -rf "$tmpd"
+              if [ -f "$t/build/ram-block/original-bindings.S" ]; then
+                cp -f "$t/build/ram-block/original-bindings.S" "$t/build/storage-bindings/ram-block-original-bindings.S"
+              fi
+              # Locate and extract virtio storage bindings if available.
+              while IFS= read -r va; do
+                [ -f "$va" ] || continue
+                tmpd="$t/build/storage-bindings/.virtio-tmp"
+                rm -rf "$tmpd"
+                mkdir -p "$tmpd"
+                if (cd "$tmpd" && ar x "$va" original-bindings.o >/dev/null 2>&1); then
+                  cp -f "$tmpd/original-bindings.o" "$t/build/storage-bindings/virtio-original-bindings.o"
+                  echo "[storage-bindings] extracted virtio bindings.o from $va"
                 fi
-              done
+                if (cd "$tmpd" && ar x "$va" original-bindings.S >/dev/null 2>&1); then
+                  cp -f "$tmpd/original-bindings.S" "$t/build/storage-bindings/virtio-original-bindings.S"
+                  echo "[storage-bindings] extracted virtio bindings.S from $va"
+                fi
+                rm -rf "$tmpd"
+                [ -f "$t/build/storage-bindings/virtio-original-bindings.o" ] || [ -f "$t/build/storage-bindings/virtio-original-bindings.S" ] && break
+              done < <(
+                {
+                  printf '%s\n' \
+                    "$t/build/native-virtio-block-verified-bundle/libNativeVirtioBlock.a" \
+                    "$t/build/virtio-mmio-block/libVirtioMmioBlock.a" \
+                    "$t/build/native-virtio-block/libNativeVirtioBlock.a"
+                  find "$t/build" "$(dirname "$t")/build" -type f \( -name 'lib*Virtio*Block*.a' -o -name 'lib*virtio*block*.a' \) 2>/dev/null || true
+                } | awk 'NF && !seen[$0]++'
+              )
+              # Build merged canonical bindings from any available .S sources (union of symbols).
+              nix run nixpkgs#python3 -- - "$t/build/storage-bindings" "$t/build/ram-block" <<'PYTHON'
+              import pathlib, subprocess, sys
+              d = pathlib.Path(sys.argv[1])
+              ram = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else None
+              sources = [
+                  d / 'virtio-original-bindings.S',
+                  d / 'ram-block-original-bindings.S',
+              ]
+              if ram:
+                  sources.append(ram / 'original-bindings.S')
+              merged = {}
+              for src in sources:
+                  if not src.is_file():
+                      continue
+                  for line in src.read_text().splitlines():
+                      line = line.strip()
+                      if line.startswith('.set '):
+                          try:
+                              _, rest = line.split(None, 1)
+                              name, value = rest.split(',', 1)
+                              merged.setdefault(name.strip(), value.strip())
+                          except Exception:
+                              pass
+              if merged:
+                  sfile = d / 'merged-original-bindings.S'
+                  ofile = d / 'original-bindings.o'
+                  sfile.write_text(''.join(f'.globl {n}\n.set {n}, {v}\n' for n, v in sorted(merged.items())))
+                  for cmd in (
+                      ['xcrun', 'clang', '-target', 'arm64-apple-ios17.0', '-Werror', '-Wno-incompatible-sysroot', '-c', str(sfile), '-o', str(ofile)],
+                      ['clang', '-target', 'arm64-apple-ios17.0', '-Werror', '-Wno-incompatible-sysroot', '-c', str(sfile), '-o', str(ofile)],
+                  ):
+                      try:
+                          subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                          print(f'[storage-bindings] merged {len(merged)} symbols -> {ofile}')
+                          break
+                      except Exception:
+                          continue
+              PYTHON
+              # Fallback canonical selection if merge did not produce object.
               if [ ! -f "$t/build/storage-bindings/original-bindings.o" ]; then
                 for c in \
                   "$t/build/storage-bindings/virtio-original-bindings.o" \
@@ -766,14 +821,18 @@ jobs:
                   "$t/build/ram-block/original-bindings.o"; do
                   if [ -f "$c" ]; then
                     cp -f "$c" "$t/build/storage-bindings/original-bindings.o"
+                    echo "[storage-bindings] canonical=$(basename "$c")"
                     break
                   fi
                 done
+              else
+                echo "[storage-bindings] canonical=merged-original-bindings"
               fi
               echo "[ram-block] tree=$t src=${src:-none}"
               ls -la "$t/build/ram-block" 2>/dev/null || true
               echo "[storage-bindings] tree=$t"
               ls -la "$t/build/storage-bindings" 2>/dev/null || true
+              find "$t/build" -maxdepth 4 -type f \( -name '*Virtio*Block*.a' -o -name '*virtio*block*.a' -o -name 'libNativeRamBlock.a' -o -name 'libRamBlock.a' -o -name 'original-bindings.*' \) 2>/dev/null | head -120 || true
             done
           '
 
