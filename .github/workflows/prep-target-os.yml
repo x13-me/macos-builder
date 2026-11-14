@@ -648,9 +648,23 @@ jobs:
           nix develop "$BUILDER#ci" -c bash -euo pipefail -c '
             export XNU_OWNER_DATA_VOLUME_UUID XNU_OWNER_ROOT_VOLUME_UUID XNU_OWNER_CACHE_VOLUME_UUID
             for t in "$TREE" out/*/tree; do
+              [ -d "$t" ] || continue
               fontdir="$t/uefi-sheng/Silicon/Silicium/SiliciumPkg/Library/FrameBufferSerialPortLib"
               mkdir -p "$fontdir" 2>/dev/null || true
               curl -fsSL https://raw.githubusercontent.com/Project-Silicium/Mu-Silicium/main/Silicon/Silicium/SiliciumPkg/Library/FrameBufferSerialPortLib/Font.h -o "$fontdir/Font.h" 2>/dev/null || true
+              # Device port may emit RAM block artifacts under build/native-ram-block;
+              # publish canonical build/ram-block names expected by build-xnu-4k-baseline.sh.
+              if [ -d "$t/build/native-ram-block" ]; then
+                mkdir -p "$t/build/ram-block"
+                for f in "$t/build/native-ram-block"/*; do
+                  [ -e "$f" ] || continue
+                  b=$(basename "$f")
+                  case "$b" in
+                    libNativeRamBlock.a) ln -sfn "$f" "$t/build/ram-block/libRamBlock.a" ;;
+                    *) ln -sfn "$f" "$t/build/ram-block/$b" ;;
+                  esac
+                done
+              fi
             done
             ./unixnu defconfig "$DEFCONFIG" -D ../device
             ./unixnu build kernel -D ../device
