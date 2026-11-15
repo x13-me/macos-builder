@@ -775,7 +775,7 @@ jobs:
                 } | awk 'NF && !seen[$0]++'
               )
               # Build merged canonical bindings from any available .S sources (union of symbols).
-              nix run nixpkgs#python3 -- - "$t/build/storage-bindings" "$t/build/ram-block" <<'PYTHON'
+              nix run nixpkgs#python3 -- - "$t/build/storage-bindings" "$t/build/ram-block" <<PYTHON
               import pathlib, subprocess, sys
               d = pathlib.Path(sys.argv[1])
               ram = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else None
@@ -837,7 +837,7 @@ jobs:
           '
 
           # Patch kernel build script so storage driver links include shared original bindings.
-          nix run nixpkgs#python3 -- - "$TREE/scripts/build-xnu-4k-baseline.sh" <<'PYTHON'
+          nix run nixpkgs#python3 -- - "$TREE/scripts/build-xnu-4k-baseline.sh" <<PYTHON
           import pathlib
           import sys
 
@@ -869,7 +869,7 @@ jobs:
           PYTHON
           for f in out/*/tree/scripts/build-xnu-4k-baseline.sh; do
             [ -f "$f" ] || continue
-            nix run nixpkgs#python3 -- - "$f" <<'PYTHON'
+            nix run nixpkgs#python3 -- - "$f" <<PYTHON
           import pathlib
           import sys
 
