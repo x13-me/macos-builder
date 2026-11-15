@@ -780,35 +780,35 @@ jobs:
               d = pathlib.Path(sys.argv[1])
               ram = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else None
               sources = [
-                  d / 'virtio-original-bindings.S',
-                  d / 'ram-block-original-bindings.S',
+                  d / "virtio-original-bindings.S",
+                  d / "ram-block-original-bindings.S",
               ]
               if ram:
-                  sources.append(ram / 'original-bindings.S')
+                  sources.append(ram / "original-bindings.S")
               merged = {}
               for src in sources:
                   if not src.is_file():
                       continue
                   for line in src.read_text().splitlines():
                       line = line.strip()
-                      if line.startswith('.set '):
+                      if line.startswith(".set "):
                           try:
                               _, rest = line.split(None, 1)
-                              name, value = rest.split(',', 1)
+                              name, value = rest.split(",", 1)
                               merged.setdefault(name.strip(), value.strip())
                           except Exception:
                               pass
               if merged:
-                  sfile = d / 'merged-original-bindings.S'
-                  ofile = d / 'original-bindings.o'
-                  sfile.write_text(''.join(f'.globl {n}\n.set {n}, {v}\n' for n, v in sorted(merged.items())))
+                  sfile = d / "merged-original-bindings.S"
+                  ofile = d / "original-bindings.o"
+                  sfile.write_text("".join(f".globl {n}\n.set {n}, {v}\n" for n, v in sorted(merged.items())))
                   for cmd in (
-                      ['xcrun', 'clang', '-target', 'arm64-apple-ios17.0', '-Werror', '-Wno-incompatible-sysroot', '-c', str(sfile), '-o', str(ofile)],
-                      ['clang', '-target', 'arm64-apple-ios17.0', '-Werror', '-Wno-incompatible-sysroot', '-c', str(sfile), '-o', str(ofile)],
+                      ["xcrun", "clang", "-target", "arm64-apple-ios17.0", "-Werror", "-Wno-incompatible-sysroot", "-c", str(sfile), "-o", str(ofile)],
+                      ["clang", "-target", "arm64-apple-ios17.0", "-Werror", "-Wno-incompatible-sysroot", "-c", str(sfile), "-o", str(ofile)],
                   ):
                       try:
                           subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                          print(f'[storage-bindings] merged {len(merged)} symbols -> {ofile}')
+                          print(f"[storage-bindings] merged {len(merged)} symbols -> {ofile}")
                           break
                       except Exception:
                           continue
@@ -846,59 +846,59 @@ jobs:
               if not p.is_file():
                   continue
               s = p.read_text()
-              old = '      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n      test -f "$RAM_BLOCK_OBJECT"\n      KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT"\n'
+              old = "      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n      test -f \"$RAM_BLOCK_OBJECT\"\n      KERNEL_EXTRA_ARCHIVES=\"$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT\"\n"
               new = (
-                  '      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n'
-                  '      test -f "$RAM_BLOCK_OBJECT"\n'
-                  '      for RAM_BLOCK_BINDINGS in \\\n'
-                  '        "$ROOT/build/storage-bindings/original-bindings.o" \\\n'
-                  '        "$ROOT/build/storage-bindings/ram-block-original-bindings.o" \\\n'
-                  '        "$ROOT/build/storage-bindings/virtio-original-bindings.o" \\\n'
-                  '        "$ROOT/build/ram-block/original-bindings.o"; do\n'
-                  '        if [ -f "$RAM_BLOCK_BINDINGS" ]; then\n'
-                  '          KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_BINDINGS"\n'
-                  '          break\n'
-                  '        fi\n'
-                  '      done\n'
-                  '      KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT"\n'
+                  "      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n"
+                  "      test -f \"$RAM_BLOCK_OBJECT\"\n"
+                  "      for RAM_BLOCK_BINDINGS in \\\n"
+                  "        \"$ROOT/build/storage-bindings/original-bindings.o\" \\\n"
+                  "        \"$ROOT/build/storage-bindings/ram-block-original-bindings.o\" \\\n"
+                  "        \"$ROOT/build/storage-bindings/virtio-original-bindings.o\" \\\n"
+                  "        \"$ROOT/build/ram-block/original-bindings.o\"; do\n"
+                  "        if [ -f \"$RAM_BLOCK_BINDINGS\" ]; then\n"
+                  "          KERNEL_EXTRA_ARCHIVES=\"$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_BINDINGS\"\n"
+                  "          break\n"
+                  "        fi\n"
+                  "      done\n"
+                  "      KERNEL_EXTRA_ARCHIVES=\"$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT\"\n"
               )
-              if old in s and 'build/storage-bindings/original-bindings.o' not in s:
+              if old in s and "build/storage-bindings/original-bindings.o" not in s:
                   s = s.replace(old, new)
                   p.write_text(s)
-                  print(f'Patched {p}: link shared storage original-bindings.o with raw ram-block object')
+                  print(f"Patched {p}: link shared storage original-bindings.o with raw ram-block object")
           PYTHON
           for f in out/*/tree/scripts/build-xnu-4k-baseline.sh; do
             [ -f "$f" ] || continue
             nix run nixpkgs#python3 -- - "$f" <<PYTHON
-          import pathlib
-          import sys
+            import pathlib
+            import sys
 
-          for arg in sys.argv[1:]:
-              p = pathlib.Path(arg)
-              if not p.is_file():
-                  continue
-              s = p.read_text()
-              old = '      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n      test -f "$RAM_BLOCK_OBJECT"\n      KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT"\n'
-              new = (
-                  '      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n'
-                  '      test -f "$RAM_BLOCK_OBJECT"\n'
-                  '      for RAM_BLOCK_BINDINGS in \\\n'
-                  '        "$ROOT/build/storage-bindings/original-bindings.o" \\\n'
-                  '        "$ROOT/build/storage-bindings/ram-block-original-bindings.o" \\\n'
-                  '        "$ROOT/build/storage-bindings/virtio-original-bindings.o" \\\n'
-                  '        "$ROOT/build/ram-block/original-bindings.o"; do\n'
-                  '        if [ -f "$RAM_BLOCK_BINDINGS" ]; then\n'
-                  '          KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_BINDINGS"\n'
-                  '          break\n'
-                  '        fi\n'
-                  '      done\n'
-                  '      KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT"\n'
-              )
-              if old in s and 'build/storage-bindings/original-bindings.o' not in s:
-                  s = s.replace(old, new)
-                  p.write_text(s)
-                  print(f'Patched {p}: link shared storage original-bindings.o with raw ram-block object')
-          PYTHON
+            for arg in sys.argv[1:]:
+                p = pathlib.Path(arg)
+                if not p.is_file():
+                    continue
+                s = p.read_text()
+                old = "      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n      test -f \"$RAM_BLOCK_OBJECT\"\n      KERNEL_EXTRA_ARCHIVES=\"$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT\"\n"
+                new = (
+                    "      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n"
+                    "      test -f \"$RAM_BLOCK_OBJECT\"\n"
+                    "      for RAM_BLOCK_BINDINGS in \\\n"
+                    "        \"$ROOT/build/storage-bindings/original-bindings.o\" \\\n"
+                    "        \"$ROOT/build/storage-bindings/ram-block-original-bindings.o\" \\\n"
+                    "        \"$ROOT/build/storage-bindings/virtio-original-bindings.o\" \\\n"
+                    "        \"$ROOT/build/ram-block/original-bindings.o\"; do\n"
+                    "        if [ -f \"$RAM_BLOCK_BINDINGS\" ]; then\n"
+                    "          KERNEL_EXTRA_ARCHIVES=\"$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_BINDINGS\"\n"
+                    "          break\n"
+                    "        fi\n"
+                    "      done\n"
+                    "      KERNEL_EXTRA_ARCHIVES=\"$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT\"\n"
+                )
+                if old in s and "build/storage-bindings/original-bindings.o" not in s:
+                    s = s.replace(old, new)
+                    p.write_text(s)
+                    print(f"Patched {p}: link shared storage original-bindings.o with raw ram-block object")
+            PYTHON
           done
 
           nix develop "$BUILDER#ci" -c bash -euo pipefail -c '
