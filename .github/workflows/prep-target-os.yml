@@ -828,11 +828,33 @@ jobs:
               else
                 echo "[storage-bindings] canonical=merged-original-bindings"
               fi
-              echo "[ram-block] tree=$t src=${src:-none}"
+              # Ensure bindings.json is available next to any ram-block archive/object the
+              # kernel link/validation script may use.
+              bj_src=""
+              for bj_cand in \
+                "$t/build/ram-block/bindings.json" \
+                "$t/build/native-ram-block/bindings.json" \
+                "$(dirname "$t")/build/native-ram-block/bindings.json"; do
+                if [ -f "$bj_cand" ]; then bj_src="$bj_cand"; break; fi
+              done
+              if [ -z "$bj_src" ]; then
+                bj_src="$(find "$t/build" "$(dirname "$t")/build" -name bindings.json 2>/dev/null | head -n 1 || true)"
+              fi
+              if [ -n "$bj_src" ] && [ -f "$bj_src" ]; then
+                mkdir -p "$t/build/ram-block" "$t/build/native-ram-block" 2>/dev/null || true
+                cp -f "$bj_src" "$t/build/ram-block/bindings.json" 2>/dev/null || true
+                while IFS= read -r rb; do
+                  [ -f "$rb" ] || continue
+                  rbd="$(dirname "$rb")"
+                  [ -f "$rbd/bindings.json" ] || cp -f "$bj_src" "$rbd/bindings.json" 2>/dev/null || true
+                done < <(find "$t/build" "$(dirname "$t")/build" -type f \( -name 'libRamBlock.a' -o -name 'libNativeRamBlock.a' -o -name 'NativeRamBlock.o' -o -name 'RamBlock.o' \) 2>/dev/null || true)
+              fi
+              echo "[ram-block] tree=$t src=${src:-none} bj=${bj_src:-none}"
               ls -la "$t/build/ram-block" 2>/dev/null || true
+              ls -la "$t/build/native-ram-block" 2>/dev/null || true
               echo "[storage-bindings] tree=$t"
               ls -la "$t/build/storage-bindings" 2>/dev/null || true
-              find "$t/build" -maxdepth 4 -type f \( -name '*Virtio*Block*.a' -o -name '*virtio*block*.a' -o -name 'libNativeRamBlock.a' -o -name 'libRamBlock.a' -o -name 'original-bindings.*' \) 2>/dev/null | head -120 || true
+              find "$t/build" -maxdepth 4 -type f \( -name '*Virtio*Block*.a' -o -name '*virtio*block*.a' -o -name 'libNativeRamBlock.a' -o -name 'libRamBlock.a' -o -name 'NativeRamBlock.o' -o -name 'RamBlock.o' -o -name 'bindings.json' -o -name 'original-bindings.*' \) 2>/dev/null | head -160 || true
             done
           '
 
