@@ -836,73 +836,9 @@ jobs:
             done
           '
 
-          # Patch kernel build script so storage driver links include shared original bindings.
-          nix run nixpkgs#python3 -- - "$TREE/scripts/build-xnu-4k-baseline.sh" <<PYTHON
-          import pathlib
-          import sys
-
-          for arg in sys.argv[1:]:
-              p = pathlib.Path(arg)
-              if not p.is_file():
-                  continue
-              s = p.read_text()
-              old = "      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n      test -f \"$RAM_BLOCK_OBJECT\"\n      KERNEL_EXTRA_ARCHIVES=\"$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT\"\n"
-              new = (
-                  "      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n"
-                  "      test -f \"$RAM_BLOCK_OBJECT\"\n"
-                  "      for RAM_BLOCK_BINDINGS in \\\n"
-                  "        \"$ROOT/build/storage-bindings/original-bindings.o\" \\\n"
-                  "        \"$ROOT/build/storage-bindings/ram-block-original-bindings.o\" \\\n"
-                  "        \"$ROOT/build/storage-bindings/virtio-original-bindings.o\" \\\n"
-                  "        \"$ROOT/build/ram-block/original-bindings.o\"; do\n"
-                  "        if [ -f \"$RAM_BLOCK_BINDINGS\" ]; then\n"
-                  "          KERNEL_EXTRA_ARCHIVES=\"$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_BINDINGS\"\n"
-                  "          break\n"
-                  "        fi\n"
-                  "      done\n"
-                  "      KERNEL_EXTRA_ARCHIVES=\"$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT\"\n"
-              )
-              if old in s and "build/storage-bindings/original-bindings.o" not in s:
-                  s = s.replace(old, new)
-                  p.write_text(s)
-                  print(f"Patched {p}: link shared storage original-bindings.o with raw ram-block object")
-          PYTHON
-          for f in out/*/tree/scripts/build-xnu-4k-baseline.sh; do
-            [ -f "$f" ] || continue
-            nix run nixpkgs#python3 -- - "$f" <<PYTHON
-            import pathlib
-            import sys
-
-            for arg in sys.argv[1:]:
-                p = pathlib.Path(arg)
-                if not p.is_file():
-                    continue
-                s = p.read_text()
-                old = "      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n      test -f \"$RAM_BLOCK_OBJECT\"\n      KERNEL_EXTRA_ARCHIVES=\"$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT\"\n"
-                new = (
-                    "      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n"
-                    "      test -f \"$RAM_BLOCK_OBJECT\"\n"
-                    "      for RAM_BLOCK_BINDINGS in \\\n"
-                    "        \"$ROOT/build/storage-bindings/original-bindings.o\" \\\n"
-                    "        \"$ROOT/build/storage-bindings/ram-block-original-bindings.o\" \\\n"
-                    "        \"$ROOT/build/storage-bindings/virtio-original-bindings.o\" \\\n"
-                    "        \"$ROOT/build/ram-block/original-bindings.o\"; do\n"
-                    "        if [ -f \"$RAM_BLOCK_BINDINGS\" ]; then\n"
-                    "          KERNEL_EXTRA_ARCHIVES=\"$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_BINDINGS\"\n"
-                    "          break\n"
-                    "        fi\n"
-                    "      done\n"
-                    "      KERNEL_EXTRA_ARCHIVES=\"$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT\"\n"
-                )
-                if old in s and "build/storage-bindings/original-bindings.o" not in s:
-                    s = s.replace(old, new)
-                    p.write_text(s)
-                    print(f"Patched {p}: link shared storage original-bindings.o with raw ram-block object")
-            PYTHON
-          done
-
           nix develop "$BUILDER#ci" -c bash -euo pipefail -c '
             export XNU_OWNER_DATA_VOLUME_UUID XNU_OWNER_ROOT_VOLUME_UUID XNU_OWNER_CACHE_VOLUME_UUID
+            python3 "$BUILDER/scripts/patch-storage-bindings.py" "$TREE/scripts/build-xnu-4k-baseline.sh" out/*/tree/scripts/build-xnu-4k-baseline.sh
             ./unixnu build kernel -D ../device
             trust="$TREE/build/original-static-system-trust/original-static-system.bundle"
             data="$TREE/.cache/firmware/owner-data/owner-data-1g.dbr"
