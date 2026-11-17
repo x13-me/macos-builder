@@ -1,14 +1,17 @@
 #!/usr/bin/env nix
 #! nix shell nixpkgs#python3 -c python3
 import pathlib
+import re
 import sys
 
-old = (
+# Both-transports path (virtio archive force-loaded + ram block object linked separately):
+# ensure original storage bindings (IOBlockStorageDevice aliases) are linked once.
+old_ram = (
     "      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n"
     "      test -f \"$RAM_BLOCK_OBJECT\"\n"
     "      KERNEL_EXTRA_ARCHIVES=\"$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT\"\n"
 )
-new = (
+new_ram = (
     "      RAM_BLOCK_OBJECT=$ROOT/build/ram-block/NativeRamBlock.o\n"
     "      test -f \"$RAM_BLOCK_OBJECT\"\n"
     "      for RAM_BLOCK_BINDINGS in \\\n"
@@ -24,7 +27,33 @@ new = (
     "      KERNEL_EXTRA_ARCHIVES=\"$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT\"\n"
 )
 
-import re
+# Virtio-only/primary path: when force-loading the virtio block archive, also add bindings
+# if present (some bundles ship bindings as a separate object, not inside the archive).
+old_virtio = (
+    "    VIRTIO_ARCHIVE=${XNU_NATIVE_VIRTIO_BLOCK_ARCHIVE:-$ROOT/build/virtio-mmio-block/libVirtioMmioBlock.a}\n"
+    "    test -f \"$VIRTIO_ARCHIVE\"\n"
+    "    KERNEL_EXTRA_ARCHIVES=\"$KERNEL_EXTRA_ARCHIVES -Wl,-force_load,$VIRTIO_ARCHIVE\"\n"
+    "    KERNEL_ARCHIVE_DEPENDENCIES=\"$KERNEL_ARCHIVE_DEPENDENCIES $VIRTIO_ARCHIVE\"\n"
+)
+new_virtio = (
+    "    VIRTIO_ARCHIVE=${XNU_NATIVE_VIRTIO_BLOCK_ARCHIVE:-$ROOT/build/virtio-mmio-block/libVirtioMmioBlock.a}\n"
+    "    test -f \"$VIRTIO_ARCHIVE\"\n"
+    "    KERNEL_EXTRA_ARCHIVES=\"$KERNEL_EXTRA_ARCHIVES -Wl,-force_load,$VIRTIO_ARCHIVE\"\n"
+    "    KERNEL_ARCHIVE_DEPENDENCIES=\"$KERNEL_ARCHIVE_DEPENDENCIES $VIRTIO_ARCHIVE\"\n"
+    "    for VIRTIO_BLOCK_BINDINGS in \\\n"
+    "      \"$ROOT/build/storage-bindings/original-bindings.o\" \\\n"
+    "      \"$ROOT/build/storage-bindings/virtio-original-bindings.o\" \\\n"
+    "      \"$(dirname \"$VIRTIO_ARCHIVE\")/original-bindings.o\" \\\n"
+    "      \"$ROOT/build/ram-block/original-bindings.o\"; do\n"
+    "      if [ -f \"$VIRTIO_BLOCK_BINDINGS\" ]; then\n"
+    "        case \" $KERNEL_EXTRA_ARCHIVES \" in\n"
+    "          *\" $VIRTIO_BLOCK_BINDINGS \"*) ;;\n"
+    "          *) KERNEL_EXTRA_ARCHIVES=\"$KERNEL_EXTRA_ARCHIVES $VIRTIO_BLOCK_BINDINGS\" ;;\n"
+    "        esac\n"
+    "        break\n"
+    "      fi\n"
+    "    done\n"
+)
 
 bindings_pat = re.compile(
     r"(?m)^([ \t]*)records\s*=\s*\[json\.loads\(Path\(p\)\.with_name\('bindings\.json'\)\.read_text\(\)\)\s+for p in sys\.argv\[1:\]\]\s*$"
@@ -62,16 +91,15 @@ for arg in sys.argv[1:]:
     if not p.is_file():
         continue
     s = p.read_text()
-    changed = False
-    if old in s and "build/storage-bindings/original-bindings.o" not in s:
-        s = s.replace(old, new)
-        changed = True
+    orig = s
+    if old_ram in s and "for RAM_BLOCK_BINDINGS in" not in s:
+        s = s.replace(old_ram, new_ram)
+    if old_virtio in s and "for VIRTIO_BLOCK_BINDINGS in" not in s:
+        s = s.replace(old_virtio, new_virtio)
     if "def load_record(p):" not in s and bindings_pat.search(s):
-        s, n = bindings_pat.subn(bindings_repl, s, count=1)
-        if n:
-            changed = True
-    if changed:
+        s, _n = bindings_pat.subn(bindings_repl, s, count=1)
+    if s != orig:
         p.write_text(s)
         print(f"Patched {p}: storage bindings handling")
     else:
-        print(f"Unchanged {p}: extra={('build/storage-bindings/original-bindings.o' in s)} bindings={( 'def load_record(p):' in s )}")
+        print(f"Unchanged {p}: ram={('for RAM_BLOCK_BINDINGS in' in s)} virtio={('for VIRTIO_BLOCK_BINDINGS in' in s)} bindings={( 'def load_record(p):' in s )}")
