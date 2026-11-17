@@ -536,6 +536,21 @@ jobs:
                       "        step(_packed, raw, seed)"
                   ))
                   print('Patched device/scripts/build-os-root.py: locate packed_ramdisk.py fallback')
+              container_old = "    container = next(entry['ContainerReference'] for entry in listing['Containers']\n                      if any(s['DeviceIdentifier'] == store for s in entry.get('PhysicalStores', [])))"
+              container_new = (
+                  "    _store_id = store.split('/')[-1] if isinstance(store, str) else store\n"
+                  "    _candidates = [c for c in listing.get('Containers', [])\n"
+                  "                   if any(s.get('DeviceIdentifier') in (store, _store_id, '/dev/' + _store_id)\n"
+                  "                          for s in c.get('PhysicalStores', []))]\n"
+                  "    if not _candidates and listing.get('Containers'):\n"
+                  "        _candidates = [listing['Containers'][0]]\n"
+                  "    if not _candidates:\n"
+                  "        raise RuntimeError(f'No APFS container found for store {store!r} in {listing!r}')\n"
+                  "    container = _candidates[0]['ContainerReference']"
+              )
+              if container_old in t and 'No APFS container found for store' not in t:
+                  t = t.replace(container_old, container_new)
+                  print('Patched device/scripts/build-os-root.py: robust APFS container lookup')
               os_root.write_text(t)
               print('Patched device/scripts/build-os-root.py: CI compatibility fixes')
           PYTHON
