@@ -152,7 +152,33 @@ for t in "$TREE" out/*/tree; do
   echo "[ram-block] tree=$t src=${src:-none} bj=${bj_src:-none}"
   ls -la "$t/build/ram-block" 2>/dev/null || true
   ls -la "$t/build/native-ram-block" 2>/dev/null || true
+  # Root rebuild may need IOBlockStorageDevice class implementation (vtable/ctor/dtor/getProperty)
+  # when linking NativeVirtioBlock/NativeRamBlock drivers. Stage any found implementation objects.
+  mkdir -p "$t/build/storage-bindings"
+  if [ ! -f "$t/build/storage-bindings/IOBlockStorageDevice.o" ]; then
+    iobsd="$(
+      find "$t/build" "$(dirname "$t")/build" "$t/../build" -type f \
+        \( -name 'IOBlockStorageDevice.o' -o -name '*IOBlockStorageDevice*.o' \) 2>/dev/null \
+        | head -n 1 || true
+    )"
+    if [ -n "$iobsd" ] && [ -f "$iobsd" ]; then
+      cp -f "$iobsd" "$t/build/storage-bindings/IOBlockStorageDevice.o"
+      echo "[storage-bindings] staged IOBlockStorageDevice impl: $iobsd"
+    fi
+  fi
+  if [ ! -f "$t/build/storage-bindings/IOStorage.o" ]; then
+    iostor="$(
+      find "$t/build" "$(dirname "$t")/build" "$t/../build" -type f \
+        \( -name 'IOStorage.o' -o -name '*IOStorage*.o' \) 2>/dev/null \
+        | head -n 1 || true
+    )"
+    if [ -n "$iostor" ] && [ -f "$iostor" ]; then
+      cp -f "$iostor" "$t/build/storage-bindings/IOStorage.o"
+      echo "[storage-bindings] staged IOStorage impl: $iostor"
+    fi
+  fi
+
   echo "[storage-bindings] tree=$t"
   ls -la "$t/build/storage-bindings" 2>/dev/null || true
-  find "$t/build" -maxdepth 4 -type f \( -name '*Virtio*Block*.a' -o -name '*virtio*block*.a' -o -name 'libNativeRamBlock.a' -o -name 'libRamBlock.a' -o -name 'NativeRamBlock.o' -o -name 'RamBlock.o' -o -name 'bindings.json' -o -name 'original-bindings.*' \) 2>/dev/null | head -160 || true
+  find "$t/build" -maxdepth 4 -type f \( -name '*Virtio*Block*.a' -o -name '*virtio*block*.a' -o -name 'libNativeRamBlock.a' -o -name 'libRamBlock.a' -o -name 'NativeRamBlock.o' -o -name 'RamBlock.o' -o -name 'bindings.json' -o -name 'original-bindings.*' -o -name 'IOBlockStorageDevice.o' -o -name 'IOStorage.o' \) 2>/dev/null | head -160 || true
 done

@@ -55,6 +55,21 @@ new_virtio = (
     "    done\n"
 )
 
+# Root rebuild kernel link may require IOBlockStorageDevice/IOStorage class impl objects
+# when linking NativeVirtioBlock/NativeRamBlock (staged by prepare-root-storage-bindings.sh).
+storage_impl_inject = (
+    "    for STORAGE_IMPL in \\\n"
+    "      \"$ROOT/build/storage-bindings/IOBlockStorageDevice.o\" \\\n"
+    "      \"$ROOT/build/storage-bindings/IOStorage.o\"; do\n"
+    "      if [ -f \"$STORAGE_IMPL\" ]; then\n"
+    "        case \" $KERNEL_EXTRA_ARCHIVES \" in\n"
+    "          *\" $STORAGE_IMPL \"*) ;;\n"
+    "          *) KERNEL_EXTRA_ARCHIVES=\"$KERNEL_EXTRA_ARCHIVES $STORAGE_IMPL\" ;;\n"
+    "        esac\n"
+    "      fi\n"
+    "    done\n"
+)
+
 bindings_pat = re.compile(
     r"(?m)^([ \t]*)records\s*=\s*\[json\.loads\(Path\(p\)\.with_name\('bindings\.json'\)\.read_text\(\)\)\s+for p in sys\.argv\[1:\]\]\s*$"
 )
@@ -96,6 +111,11 @@ for arg in sys.argv[1:]:
         s = s.replace(old_ram, new_ram)
     if old_virtio in s and "for VIRTIO_BLOCK_BINDINGS in" not in s:
         s = s.replace(old_virtio, new_virtio)
+    # Inject IOBlockStorageDevice/IOStorage implementation linking (idempotent).
+    if "IOBlockStorageDevice.o" not in s or "for STORAGE_IMPL in" not in s:
+        marker = 'KERNEL_ARCHIVE_DEPENDENCIES="$KERNEL_ARCHIVE_DEPENDENCIES $VIRTIO_ARCHIVE"\n'
+        if marker in s and "for STORAGE_IMPL in" not in s:
+            s = s.replace(marker, marker + storage_impl_inject)
     if "def load_record(p):" not in s and bindings_pat.search(s):
         s, _n = bindings_pat.subn(bindings_repl, s, count=1)
     if s != orig:
