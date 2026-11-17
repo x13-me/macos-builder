@@ -390,19 +390,15 @@ jobs:
               if not cfg.exists():
                   continue
               text = cfg.read_text()
+              changed = False
               if 'CONFIG_XNU_BUILD_ARCHIVES=y' not in text:
                   if not text.endswith('\n'):
                       text += '\n'
                   text += 'CONFIG_XNU_BUILD_ARCHIVES=y\n'
+                  changed = True
                   print(f'Patched {cfg}: enabled CONFIG_XNU_BUILD_ARCHIVES')
-              # Root rebuild links NativeVirtioBlock/NativeRamBlock which require IOBlockStorageDevice
-              # implementation (vtable/getProperty); ensure source storage family is built.
-              if name == 'qemu_root_defconfig' and 'CONFIG_XNU_SOURCE_STORAGE=y' not in text:
-                  if not text.endswith('\n'):
-                      text += '\n'
-                  text += 'CONFIG_XNU_SOURCE_STORAGE=y\n'
-                  print(f'Patched {cfg}: enabled CONFIG_XNU_SOURCE_STORAGE')
-              cfg.write_text(text)
+              if changed:
+                  cfg.write_text(text)
 
           board = Path('device/board.toml')
           if board.exists():
