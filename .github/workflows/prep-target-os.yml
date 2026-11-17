@@ -451,8 +451,20 @@ jobs:
                       '  (void)size;\n'
                       '}\n'
                   )
-                  link_stubs.write_text(text)
                   print('Patched device/package/LinkStubs.c: add missing weak stubs')
+              sleep_marker = 'arm64_platform_sleep_hook'
+              if sleep_marker not in text:
+                  if not text.endswith('\n'):
+                      text += '\n'
+                  text += (
+                      '\n'
+                      '// ArmCpu declares arm64_platform_sleep_hook weak_import, but a static kernel link still\n'
+                      '// requires a definition. Left null: ml_arm_sleep keeps its own WFI path.\n'
+                      'extern void (*arm64_platform_sleep_hook)(int boot_cpu);\n'
+                      'STUB void (*arm64_platform_sleep_hook)(int boot_cpu) = 0;\n'
+                  )
+                  print('Patched device/package/LinkStubs.c: add arm64_platform_sleep_hook stub')
+              link_stubs.write_text(text)
 
           make_adt = Path('device/scripts/make-qemu-adt.py')
           if make_adt.exists():
